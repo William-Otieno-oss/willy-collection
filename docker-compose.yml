@@ -1,0 +1,126 @@
+version: "3.9"
+
+services:
+  # Backend API server
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+      args:
+        BUILD_DATE: ${BUILD_DATE:-$(date -u +'%Y-%m-%dT%H:%M:%SZ')}
+        VCS_REF: ${VCS_REF:-unknown}
+    container_name: willy_backend
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: 4000
+      BACKEND_HOST: 0.0.0.0
+      DATABASE_URL: ${DATABASE_URL:-file:/app/data/prod.db}
+      JWT_SECRET: ${JWT_SECRET}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000}
+      LOG_LEVEL: ${LOG_LEVEL:-warn}
+      RATE_LIMIT_WINDOW_MS: ${RATE_LIMIT_WINDOW_MS:-900000}
+      RATE_LIMIT_MAX_REQUESTS: ${RATE_LIMIT_MAX_REQUESTS:-100}
+      MAX_UPLOAD_SIZE: ${MAX_UPLOAD_SIZE:-5242880}
+      MAX_FILES: ${MAX_FILES:-16}
+
+      # Optional: AWS S3 configuration
+      # AWS_REGION: ${AWS_REGION}
+      # AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      # AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      # AWS_S3_BUCKET: ${AWS_S3_BUCKET}
+      # AWS_S3_ENDPOINT: ${AWS_S3_ENDPOINT}
+
+    volumes:
+      - ./data:/app/data:rw
+      - ./uploads:/app/uploads:rw
+      - ./quarantine:/app/quarantine:rw
+
+    networks:
+      - willy_network
+
+    depends_on:
+      db_check:
+        condition: service_completed_successfully
+
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "require('http').get('http://localhost:4000/api/health', (r) => {if (r.statusCode !== 200) throw new Error(r.statusCode)})",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+    security_opt:
+      - no-new-privileges:true
+    read_only_root_filesystem: false
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+
+  # Frontend web server
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        BUILD_DATE: ${BUILD_DATE:-$(date -u +'%Y-%m-%dT%H:%M:%SZ')}
+        VCS_REF: ${VCS_REF:-unknown}
+    container_name: willy_frontend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:4000}
+
+    networks:
+      - willy_network
+
+    depends_on:
+      backend:
+        condition: service_healthy
+
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "require('http').get('http://localhost:3000', (r) => {if (r.statusCode !== 200) throw new Error(r.statusCode)})",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+    security_opt:
+      - no-new-privileges:true
+    read_only_root_filesystem: false
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+
+  # Database initialization check
+  db_check:
+    image: busybox:latest
+    command: echo "Database volume ready"
+    volumes:
+      - ./data:/app/data:rw
+
+networks:
+  willy_network:
+    driver: bridge
+
+volumes:
+  data:
+    driver: local

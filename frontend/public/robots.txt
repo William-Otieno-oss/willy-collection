@@ -1,0 +1,15 @@
+User-agent: *
+Allow: /
+Disallow: /admin
+Disallow: /api
+Disallow: /*.json$
+Disallow: /*?*
+Disallow: *?sort=
+Disallow: *?page=
+
+# Delay for bots (optional)
+Crawl-delay: 1
+Request-rate: 1/5s
+
+# Sitemap
+Sitemap: https://willy-collection.com/sitemap.xml
