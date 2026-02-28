@@ -37,7 +37,7 @@ export default function CarouselSection() {
         />
 
         {/* Main Carousel Area */}
-        <div className="flex-1 relative overflow-hidden bg-gray-900">
+        <div className="flex-1 relative overflow-hidden bg-neutral-100">
           {/* Carousel Slides */}
           {slides.map((slide, idx) => (
             <div
@@ -48,8 +48,8 @@ export default function CarouselSection() {
             >
               {/* Background Image */}
               <Image
-                src={slide.image}
-                alt={slide.title}
+                src={(slide && typeof slide.image === "string" && slide.image.trim() !== "") ? slide.image : "/placeholder.svg"}
+                alt={slide.title || "carousel"}
                 fill
                 className="object-cover"
                 priority={idx === 0}
@@ -66,11 +66,11 @@ export default function CarouselSection() {
                 <h2 className="text-6xl md:text-7xl font-bold mb-4 font-display text-accent drop-shadow-lg">
                   {slide.title}
                 </h2>
-                <p className="text-2xl md:text-3xl text-gray-100 mb-10 font-light drop-shadow-md">
+                <p className="text-2xl md:text-3xl text-neutral-100 mb-8 font-light drop-shadow-md">
                   {slide.subtitle}
                 </p>
                 <Link href={slide.link}>
-                  <button className="px-10 py-4 bg-accent hover:bg-orange-600 text-gray-900 font-bold rounded-lg transition-all duration-300 transform hover:scale-105 shadow-xl">
+                  <button className="px-8 py-3.5 bg-brand hover:bg-brand-light text-brand-dark font-semibold rounded-sm transition-all duration-200 shadow-xs hover:shadow-sm">
                     {slide.cta}
                   </button>
                 </Link>
@@ -84,10 +84,10 @@ export default function CarouselSection() {
               <button
                 key={idx}
                 onClick={() => setCurrentSlide(idx)}
-                className={`transition-all duration-300 rounded-full ${
+                className={`transition-all duration-250 rounded-full ${
                   idx === currentSlide
-                    ? "bg-accent w-8 h-3"
-                    : "bg-gray-500 hover:bg-gray-400 w-3 h-3"
+                    ? "bg-brand w-8 h-3"
+                    : "bg-neutral-500 hover:bg-neutral-400 w-3 h-3"
                 }`}
                 aria-label={`Go to slide ${idx + 1}`}
               />

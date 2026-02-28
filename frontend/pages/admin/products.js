@@ -1,7 +1,13 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/router";
 import Layout from "../../components/Layout";
-import API_BASE, { getImageUrl } from "../../lib/api";
+import {
+  API_BASE,
+  getImageUrl,
+  adminFetcher,
+  adminDeleteRequest,
+  APIError,
+} from "../../lib/api";
 import Link from "next/link";
 import Button from "../../components/Button";
 import Card from "../../components/Card";
@@ -25,33 +31,7 @@ export default function ProductsAdmin() {
   async function load() {
     try {
       setLoading(true);
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 10000);
-      let res;
-      try {
-        res = await fetch(`${API_BASE}/api/sneakers`, {
-          signal: controller.signal,
-        });
-      } catch (fetchErr) {
-        if (fetchErr.name === "AbortError") {
-          // Request timeout handled gracefully
-        } else {
-          // Fetch error handled via error state
-        }
-        throw fetchErr;
-      } finally {
-        clearTimeout(timeout);
-      }
-
-      let data;
-      if (!res.ok) {
-        const text = await res.text().catch(() => "<no body>");
-        console.error("Products API returned non-ok:", res.status, text);
-        data = [];
-      } else {
-        data = await res.json();
-      }
-      // API may return { data: [...] , total, ... } or an array directly.
+      const data = await adminFetcher("/api/sneakers");
       if (Array.isArray(data)) {
         setItems(data);
       } else if (data && Array.isArray(data.data)) {
@@ -61,44 +41,36 @@ export default function ProductsAdmin() {
       }
     } catch (err) {
       console.error("Failed to load products:", err);
+      setItems([]);
     } finally {
       setLoading(false);
     }
   }
 
   useEffect(() => {
-    // Check authentication on mount
-    const token = localStorage.getItem("admin_token");
-    const expiresAt = localStorage.getItem("admin_token_expires");
-
-    if (!token || !expiresAt || parseInt(expiresAt) <= Date.now()) {
-      localStorage.removeItem("admin_token");
-      localStorage.removeItem("admin_token_expires");
-      router.push("/admin/login");
-      return;
-    }
-
-    setAuthenticated(true);
-    load();
+    const check = async () => {
+      try {
+        // Attempt a simple admin fetch to validate the cookie-based session
+        await adminFetcher("/api/sneakers?limit=1");
+        setAuthenticated(true);
+        load();
+      } catch (err) {
+        if (err.status === 401) {
+          router.push("/admin/login");
+        }
+      }
+    };
+    check();
   }, [router]);
 
   async function deleteProduct(id) {
     if (!confirm("Delete this product? This action cannot be undone.")) return;
     setDeletingId(id);
     try {
-      const response = await fetch(`${API_BASE}/api/sneakers/${id}`, {
-        method: "DELETE",
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem("admin_token") || ""}`,
-        },
-      });
-      if (response.ok) {
-        load();
-      } else {
-        alert("Delete failed");
-      }
+      await adminDeleteRequest(`/api/sneakers/${id}`);
+      load();
     } catch (err) {
-      alert("Delete failed: " + err.message);
+      alert("Delete failed: " + (err.message || err));
     } finally {
       setDeletingId(null);
     }
@@ -212,6 +184,9 @@ export default function ProductsAdmin() {
                       src={getImageUrl(product.images[0].url)}
                       alt={product.modelName}
                       className="w-full h-full object-cover group-hover:scale-110 transition-transform"
+                      onError={(e) => {
+                        e.target.src = "/placeholder.png";
+                      }}
                     />
                   ) : (
                     <div className="text-gray-400 text-center">

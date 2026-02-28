@@ -7,7 +7,7 @@ import Card from "../../components/Card";
 import Button from "../../components/Button";
 import Badge from "../../components/Badge";
 import { LoadingSpinner } from "../../components/Loading";
-import API_BASE, { fetcher, APIError } from "../../lib/api";
+import API_BASE, { fetcher, APIError, adminFetcher } from "../../lib/api";
 
 export default function AdminDashboard() {
   const router = useRouter();
@@ -22,81 +22,54 @@ export default function AdminDashboard() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    // Check authentication on mount
-    const token = localStorage.getItem("admin_token");
-    const expiresAt = localStorage.getItem("admin_token_expires");
-
-    if (!token || !expiresAt || parseInt(expiresAt) <= Date.now()) {
-      // Token missing or expired
-      localStorage.removeItem("admin_token");
-      localStorage.removeItem("admin_token_expires");
-      router.push("/admin/login");
-      return;
-    }
-
-    setAuthenticated(true);
-    loadStats(token);
+    const check = async () => {
+      try {
+        setAuthenticated(true);
+        await loadStats();
+      } catch (err) {
+        if (err.status === 401) {
+          router.push("/admin/login");
+        }
+      }
+    };
+    check();
   }, [router]);
 
-  async function loadStats(token) {
+  async function loadStats() {
     try {
       setLoading(true);
       setError("");
 
       const headers = {
-        Authorization: token ? `Bearer ${token}` : "",
         "Content-Type": "application/json",
-        "X-Requested-With": "XMLHttpRequest",
       };
 
-      // Fetch products count
-      const productsRes = await fetch(
-        `${API_BASE}/api/sneakers?limit=1&offset=0`,
-        {
-          headers,
-        },
-      ).catch((err) => {
-        throw new APIError("Failed to fetch products", 0, null);
-      });
-
-      let productCount = 0;
-      if (productsRes && productsRes.ok) {
-        try {
-          const data = await productsRes.json();
-          productCount = Array.isArray(data) ? data.length : 0;
-        } catch (e) {
-          // JSON parse error handled silently
-        }
-      } else if (productsRes && productsRes.status === 401) {
-        throw new APIError("Authentication failed", 401, null);
-      }
+      // Fetch products list so we can count them. previously we only requested
+      // a single item (`limit=1`) which caused the dashboard to show “1” even
+      // when there were many more products.  The manage-products page already
+      // pulls the full list and derives its own count, so we can reuse that
+      // approach here.
+      const productsData = await adminFetcher("/api/sneakers");
+      const productCount = Array.isArray(productsData)
+        ? productsData.length
+        : productsData && Array.isArray(productsData.data)
+          ? productsData.data.length
+          : 0;
 
       // Fetch orders
-      const ordersRes = await fetch(
-        `${API_BASE}/api/orders?limit=500&offset=0`,
-        {
-          headers,
-        },
-      ).catch((err) => {
-        throw new APIError("Failed to fetch orders", 0, null);
-      });
-
-      let ordersData = [];
-      if (ordersRes && ordersRes.ok) {
-        try {
-          const data = await ordersRes.json();
-          ordersData = Array.isArray(data) ? data : [];
-        } catch (e) {
-          // JSON parse error handled silently
-        }
-      } else if (ordersRes && ordersRes.status === 401) {
-        throw new APIError("Authentication failed", 401, null);
-      }
+      const ordersData = await adminFetcher("/api/orders?limit=500&offset=0");
 
       const pending = ordersData.filter((o) => o.status === "Pending").length;
       const revenue = ordersData.reduce((sum, o) => {
-        const total = Math.max(0, o.total || 0);
-        return sum + (typeof total === "number" ? total : 0);
+        const orderTotal = Array.isArray(o.items)
+          ? o.items.reduce((itemSum, item) => {
+              const itemPrice = typeof item.price === "number" ? item.price : 0;
+              const itemQuantity =
+                typeof item.quantity === "number" ? item.quantity : 0;
+              return itemSum + itemPrice * itemQuantity;
+            }, 0)
+          : 0;
+        return sum + Math.max(0, orderTotal);
       }, 0);
 
       setStats({
@@ -110,8 +83,7 @@ export default function AdminDashboard() {
       if (err instanceof APIError && err.status === 401) {
         setError("Session expired. Redirecting to login...");
         setTimeout(() => {
-          localStorage.removeItem("admin_token");
-          localStorage.removeItem("admin_token_expires");
+          // Token is stored as HTTP-only cookie; redirecting to login will clear it server-side
           router.push("/admin/login");
         }, 1500);
       } else {
@@ -122,10 +94,24 @@ export default function AdminDashboard() {
     }
   }
 
-  const handleLogout = () => {
-    localStorage.removeItem("admin_token");
-    localStorage.removeItem("admin_token_expires");
-    router.push("/admin/login");
+  const handleLogout = async () => {
+    try {
+      const response = await fetch(`${API_BASE}/api/auth/logout`, {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+        },
+      });
+      if (!response.ok) {
+        console.error("Logout failed");
+      }
+    } catch (err) {
+      console.error("Logout error:", err);
+    } finally {
+      // Always redirect to login after logout attempt
+      router.push("/admin/login");
+    }
   };
 
   const sections = [

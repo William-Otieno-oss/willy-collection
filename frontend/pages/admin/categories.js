@@ -1,13 +1,21 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/router";
 import Layout from "../../components/Layout";
-import { API_BASE } from "../../lib/api";
+import {
+  API_BASE,
+  adminFetcher,
+  adminPostRequest,
+  adminPutRequest,
+  adminDeleteRequest,
+  APIError,
+} from "../../lib/api";
 
 export default function AdminCategories() {
   const router = useRouter();
   const [authenticated, setAuthenticated] = useState(false);
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [errorMsg, setErrorMsg] = useState("");
   const [formData, setFormData] = useState({
     name: "",
     slug: "",
@@ -27,18 +35,15 @@ export default function AdminCategories() {
 
   // Check authentication on mount
   useEffect(() => {
-    const token = localStorage.getItem("admin_token");
-    const expiresAt = localStorage.getItem("admin_token_expires");
-
-    if (!token || !expiresAt || parseInt(expiresAt) <= Date.now()) {
-      localStorage.removeItem("admin_token");
-      localStorage.removeItem("admin_token_expires");
-      router.push("/admin/login");
-      return;
-    }
-
-    setAuthenticated(true);
-    fetchCategories();
+    const check = async () => {
+      try {
+        await fetchCategories();
+        setAuthenticated(true);
+      } catch (err) {
+        if (err.status === 401) router.push("/admin/login");
+      }
+    };
+    check();
   }, [router]);
 
   const fetchCategories = async () => {
@@ -92,24 +97,22 @@ export default function AdminCategories() {
     e.preventDefault();
     try {
       const url = editingId
-        ? `${API_BASE}/api/categories/${editingId}`
-        : `${API_BASE}/api/categories`;
+        ? `/api/categories/${editingId}`
+        : `/api/categories`;
 
-      const method = editingId ? "PUT" : "POST";
-
-      const response = await fetch(url, {
-        method,
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${localStorage.getItem("admin_token") || ""}`,
-        },
-        body: JSON.stringify(formData),
-      });
-
-      if (!response.ok) throw new Error("Failed to save category");
-
-      await fetchCategories();
-      resetForm();
+      try {
+        if (editingId) {
+          await adminPutRequest(url, formData);
+        } else {
+          await adminPostRequest(url, formData);
+        }
+        await fetchCategories();
+        resetForm();
+      } catch (err) {
+        alert(
+          "Error saving category: " + (err.data?.error?.message || err.message),
+        );
+      }
     } catch (error) {
       // Error handled via error state
       alert("Error saving category: " + error.message);
@@ -125,24 +128,19 @@ export default function AdminCategories() {
     }
 
     try {
-      const response = await fetch(
-        `${API_BASE}/api/categories/${megaMenuForm.selectedCategoryId}/mega-menu`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${localStorage.getItem("admin_token") || ""}`,
-          },
-          body: JSON.stringify({
+      try {
+        await adminPostRequest(
+          `/api/categories/${megaMenuForm.selectedCategoryId}/mega-menu`,
+          {
             title: megaMenuForm.title,
             link: megaMenuForm.link || null,
             icon: megaMenuForm.icon || null,
             order: megaMenuForm.order,
-          }),
-        },
-      );
-
-      if (!response.ok) throw new Error("Failed to add mega-menu item");
+          },
+        );
+      } catch (err) {
+        throw err;
+      }
 
       await fetchCategories();
       setMegaMenuForm({
@@ -165,41 +163,37 @@ export default function AdminCategories() {
 
   const handleDelete = async (id) => {
     if (!confirm("Are you sure you want to delete this category?")) return;
-
+    setErrorMsg("");
     try {
-      const response = await fetch(`${API_BASE}/api/categories/${id}`, {
-        method: "DELETE",
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem("admin_token") || ""}`,
-        },
-      });
-
-      if (!response.ok) throw new Error("Failed to delete category");
-
-      await fetchCategories();
+      try {
+        await adminDeleteRequest(`/api/categories/${id}`);
+        await fetchCategories();
+      } catch (err) {
+        setErrorMsg(
+          (err.data && err.data.error && err.data.error.message) ||
+            "Failed to delete category",
+        );
+      }
     } catch (error) {
-      // Error handled via error state
-      alert("Error deleting category: " + error.message);
+      setErrorMsg("Network error deleting category");
     }
   };
 
   const handleDeleteMegaMenuItem = async (itemId) => {
     if (!confirm("Are you sure?")) return;
-
+    setErrorMsg("");
     try {
-      const response = await fetch(
-        `${API_BASE}/api/categories/mega-menu/${itemId}`,
-        {
-          method: "DELETE",
-        },
-      );
-
-      if (!response.ok) throw new Error("Failed to delete");
-
-      await fetchCategories();
+      try {
+        await adminDeleteRequest(`/api/categories/mega-menu/${itemId}`);
+        await fetchCategories();
+      } catch (err) {
+        setErrorMsg(
+          (err.data && err.data.error && err.data.error.message) ||
+            "Failed to delete mega-menu item",
+        );
+      }
     } catch (error) {
-      // Error handled via error state
-      alert("Error: " + error.message);
+      setErrorMsg("Network error deleting mega-menu item");
     }
   };
 
@@ -219,7 +213,11 @@ export default function AdminCategories() {
     <Layout>
       <div className="max-w-6xl mx-auto py-12 px-4">
         <h1 className="text-4xl font-bold mb-8">Manage Categories</h1>
-
+        {errorMsg && (
+          <div style={{ color: "#b00", marginBottom: 16, fontWeight: "bold" }}>
+            {errorMsg}
+          </div>
+        )}
         {/* Category Form */}
         <div className="bg-white rounded-lg shadow-md p-8 mb-8">
           <h2 className="text-2xl font-bold mb-6">

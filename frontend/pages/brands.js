@@ -24,7 +24,7 @@ export default function BrandsPage() {
     <Layout>
       <div className="bg-gray-50 py-12 px-4 border-b border-gray-200">
         <div className="max-w-7xl mx-auto">
-          <h1 className="text-4xl font-bold mb-4" style={{ color: "#1c140c" }}>
+          <h1 className="text-4xl font-bold mb-4 text-brand-dark">
             Shop by Brand
           </h1>
           <div className="flex items-center text-sm text-gray-600">

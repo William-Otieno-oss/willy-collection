@@ -28,7 +28,11 @@ function validateCartItem(item) {
     return false;
   }
 
-  if (typeof item.price !== "number" || item.price < 0 || item.price > MAX_PRICE_VALUE) {
+  if (
+    typeof item.price !== "number" ||
+    item.price < 0 ||
+    item.price > MAX_PRICE_VALUE
+  ) {
     return false;
   }
 
@@ -37,7 +41,11 @@ function validateCartItem(item) {
   }
 
   const quantity = item.quantity || 1;
-  if (typeof quantity !== "number" || quantity < 1 || quantity > MAX_QUANTITY_PER_ITEM) {
+  if (
+    typeof quantity !== "number" ||
+    quantity < 1 ||
+    quantity > MAX_QUANTITY_PER_ITEM
+  ) {
     return false;
   }
 
@@ -55,7 +63,10 @@ function sanitizeCart(rawCart) {
     .slice(0, MAX_ITEMS_IN_CART)
     .map((item) => ({
       ...item,
-      quantity: Math.min(Math.max(Math.floor(item.quantity || 1), 1), MAX_QUANTITY_PER_ITEM),
+      quantity: Math.min(
+        Math.max(Math.floor(item.quantity || 1), 1),
+        MAX_QUANTITY_PER_ITEM,
+      ),
       price: Math.min(Math.max(Math.floor(item.price), 0), MAX_PRICE_VALUE),
     }));
 }
@@ -107,6 +118,8 @@ export default function Cart() {
       setCart(updated);
       try {
         localStorage.setItem("cart", JSON.stringify(updated));
+        window.dispatchEvent(new Event("cartUpdated"));
+        window.dispatchEvent(new Event("cartUpdated"));
       } catch (e) {
         // Error handled, cart state maintained
         setError("Failed to update cart.");
@@ -137,15 +150,19 @@ export default function Cart() {
     setCart(updated);
     try {
       localStorage.setItem("cart", JSON.stringify(updated));
+      window.dispatchEvent(new Event("cartUpdated"));
     } catch (e) {
-      console.error("Cart save error:", e);
+      // silent failure; no console output in production
       setError("Failed to update cart quantity.");
     }
   };
 
   const subtotal = cart.reduce((sum, item) => {
     const price = Math.max(0, Math.min(item.price || 0, MAX_PRICE_VALUE));
-    const quantity = Math.max(1, Math.min(item.quantity || 1, MAX_QUANTITY_PER_ITEM));
+    const quantity = Math.max(
+      1,
+      Math.min(item.quantity || 1, MAX_QUANTITY_PER_ITEM),
+    );
     return sum + price * quantity;
   }, 0);
 
@@ -200,11 +217,11 @@ export default function Cart() {
 
       <div className="max-w-7xl mx-auto px-4 py-16">
         {error && (
-          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
+          <div className="mb-6 p-4 bg-brand-light/20 border border-brand-light rounded-lg text-brand-dark text-sm">
             {error}
             <button
               onClick={() => setError("")}
-              className="ml-4 font-semibold hover:text-red-900"
+              className="ml-4 font-semibold hover:text-brand-dark"
             >
               Dismiss
             </button>
@@ -235,6 +252,8 @@ export default function Cart() {
                             "/placeholder.png"
                           }
                           alt={item.modelName || item.name || "Sneaker"}
+                          loading="lazy"
+                          decoding="async"
                           className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300"
                           onError={(e) => {
                             e.target.src = "/placeholder.png";
@@ -256,7 +275,7 @@ export default function Cart() {
                             </div>
                             <button
                               onClick={() => removeFromCart(item.id)}
-                              className="p-2 hover:bg-red-50 rounded-lg transition-colors text-red-500 hover:text-red-700"
+                              className="p-2 hover:bg-brand-light/20 rounded-lg transition-colors text-brand-dark hover:text-brand-light"
                               aria-label="Remove from cart"
                               disabled={removing === item.id}
                             >
@@ -289,7 +308,9 @@ export default function Cart() {
                               }
                               className="px-3 py-2 hover:bg-gray-100 transition-colors disabled:opacity-50"
                               aria-label="Decrease quantity"
-                              disabled={removing === item.id || item.quantity <= 1}
+                              disabled={
+                                removing === item.id || item.quantity <= 1
+                              }
                             >
                               −
                             </button>
@@ -305,13 +326,18 @@ export default function Cart() {
                               }
                               className="px-3 py-2 hover:bg-gray-100 transition-colors disabled:opacity-50"
                               aria-label="Increase quantity"
-                              disabled={removing === item.id || (item.quantity || 1) >= MAX_QUANTITY_PER_ITEM}
+                              disabled={
+                                removing === item.id ||
+                                (item.quantity || 1) >= MAX_QUANTITY_PER_ITEM
+                              }
                             >
                               +
                             </button>
                           </div>
                           {(item.quantity || 1) >= MAX_QUANTITY_PER_ITEM && (
-                            <span className="text-xs text-gray-500">Max reached</span>
+                            <span className="text-xs text-gray-500">
+                              Max reached
+                            </span>
                           )}
                         </div>
                       </div>
@@ -320,7 +346,11 @@ export default function Cart() {
                       <div className="flex flex-col justify-between items-end">
                         <div className="text-right">
                           <p className="text-3xl font-bold text-gray-900">
-                            KES {(Math.max(0, item.price || 0) * (item.quantity || 1)).toFixed(0)}
+                            KES{" "}
+                            {(
+                              Math.max(0, item.price || 0) *
+                              (item.quantity || 1)
+                            ).toFixed(0)}
                           </p>
                           <p className="text-sm text-gray-500 mt-1">
                             KES {Math.max(0, item.price || 0).toFixed(0)} each
@@ -366,7 +396,14 @@ export default function Cart() {
                 </div>
                 <div className="flex justify-between text-gray-700">
                   <span>Delivery</span>
-                  <span className="font-semibold text-green-600">FREE</span>
+                  <div className="text-right">
+                    <div className="font-semibold text-green-600">
+                      Free delivery within Nairobi CBD
+                    </div>
+                    <div className="text-xs text-gray-600">
+                      Delivery charges apply outside Nairobi CBD
+                    </div>
+                  </div>
                 </div>
               </div>
 
@@ -384,9 +421,9 @@ export default function Cart() {
                 variant="primary"
                 size="lg"
                 fullWidth
-                className="mb-4"
+                className="mb-4 font-bold text-lg shadow-md hover:shadow-lg"
               >
-                Proceed to Checkout
+                🛒 Proceed to Checkout
               </Button>
 
               <Button
@@ -406,64 +443,14 @@ export default function Cart() {
                 </div>
                 <div className="flex items-center gap-3 text-sm text-gray-600">
                   <span className="text-lg">🚚</span>
-                  <span>Free delivery across Kenya</span>
-                </div>
-                <div className="flex items-center gap-3 text-sm text-gray-600">
-                  <span className="text-lg">💬</span>
-                  <span>24/7 customer support</span>
-                </div>
-              </div>
-            </Card>
-          </div>
-        </div>
-      </div>
-    </Layout>
-  );
-}
-                </div>
-                <div className="flex justify-between text-gray-700">
-                  <span>Delivery</span>
-                  <span className="font-semibold text-green-600">FREE</span>
-                </div>
-              </div>
-
-              <div className="my-6 pt-6 border-t border-gray-200">
-                <div className="flex justify-between items-baseline">
-                  <span className="text-lg text-gray-700">Total:</span>
-                  <span className="text-4xl font-bold text-gray-900">
-                    KES {total.toFixed(0)}
-                  </span>
-                </div>
-              </div>
-
-              <Button
-                onClick={() => router.push("/checkout")}
-                variant="primary"
-                size="lg"
-                fullWidth
-                className="mb-4"
-              >
-                Proceed to Checkout
-              </Button>
-
-              <Button
-                onClick={() => router.push("/")}
-                variant="secondary"
-                size="lg"
-                fullWidth
-              >
-                Continue Shopping
-              </Button>
-
-              {/* Trust Badges */}
-              <div className="mt-8 pt-8 border-t border-gray-100 space-y-3">
-                <div className="flex items-center gap-3 text-sm text-gray-600">
-                  <span className="text-lg">🛡️</span>
-                  <span>Secure checkout with SSL encryption</span>
-                </div>
-                <div className="flex items-center gap-3 text-sm text-gray-600">
-                  <span className="text-lg">🚚</span>
-                  <span>Free delivery across Kenya</span>
+                  <div>
+                    <span className="font-semibold">
+                      Free delivery within Nairobi CBD
+                    </span>
+                    <div className="text-xs text-gray-500">
+                      Delivery charges apply outside Nairobi CBD
+                    </div>
+                  </div>
                 </div>
                 <div className="flex items-center gap-3 text-sm text-gray-600">
                   <span className="text-lg">💬</span>

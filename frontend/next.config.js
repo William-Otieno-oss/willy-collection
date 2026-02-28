@@ -14,6 +14,7 @@ const nextConfig = {
     domains: [
       "images.unsplash.com",
       "localhost",
+      "localhost:4000",
       "localhost:9000",
       "127.0.0.1:9000",
       "willy-bucket.s3.us-east-1.amazonaws.com",
@@ -37,6 +38,14 @@ const nextConfig = {
         {
           source: "/api/:path*",
           destination: "http://localhost:4000/api/:path*",
+        },
+        {
+          source: "/ready",
+          destination: "http://localhost:4000/api/ready",
+        },
+        {
+          source: "/api/ready",
+          destination: "http://localhost:4000/api/ready",
         },
       ];
     }

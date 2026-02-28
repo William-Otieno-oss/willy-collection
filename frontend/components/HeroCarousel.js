@@ -29,7 +29,20 @@ export default function HeroCarousel() {
         const response = await fetch(`${API_BASE}/api/banners`);
         if (!response.ok) throw new Error("Failed to fetch banners");
         const data = await response.json();
-        setBanners(data.length > 0 ? data : []);
+
+        // dedupe returned banners by `order` field; repeated seeding can create
+        // multiple identical entries which makes the carousel look like it's stuck
+        // on one slide even though we're advancing.  Keep first banner for each
+        // order value and preserve the API's sort order.
+        const unique = [];
+        const seen = new Set();
+        for (const b of data) {
+          if (!seen.has(b.order)) {
+            unique.push(b);
+            seen.add(b.order);
+          }
+        }
+        setBanners(unique.length > 0 ? unique : []);
         setError(null);
       } catch (err) {
         // Error handled, carousel shows without banners
@@ -188,9 +201,9 @@ export default function HeroCarousel() {
 
                   {/* CTA Button */}
                   {banner.link && (
-                    <div className="pt-4">
+                    <div className="pt-6">
                       <Link href={banner.link}>
-                        <button className="px-8 py-3 md:px-10 md:py-4 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-lg transition-all duration-300 transform hover:scale-105 shadow-lg text-sm md:text-base">
+                        <button className="px-8 py-3.5 md:px-10 md:py-4 bg-brand hover:bg-brand/90 text-white font-semibold rounded-sm transition-all duration-200 shadow-sm hover:shadow-md text-sm md:text-base">
                           {banner.ctaText || "Shop Now"}
                         </button>
                       </Link>

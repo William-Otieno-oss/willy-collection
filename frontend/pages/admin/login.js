@@ -41,12 +41,21 @@ export default function AdminLogin() {
   const [csrfToken, setCsrfToken] = useState("");
 
   useEffect(() => {
-    // Check if already authenticated
-    const token = localStorage.getItem("admin_token");
-    const expiresAt = localStorage.getItem("admin_token_expires");
-    if (token && expiresAt && parseInt(expiresAt) > Date.now()) {
-      Router.push("/admin/dashboard");
-    }
+    // If an access cookie is present the server will authenticate us.  We
+    // attempt a harmless request to verify and redirect if successful.
+    const checkAuth = async () => {
+      try {
+        const resp = await fetch(`${API_BASE}/api/orders?limit=1`, {
+          credentials: "include",
+        });
+        if (resp.ok) {
+          Router.push("/admin/dashboard");
+        }
+      } catch (e) {
+        // ignore errors, stay on login page
+      }
+    };
+    checkAuth();
   }, []);
 
   async function submit(e) {
@@ -68,7 +77,6 @@ export default function AdminLogin() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "X-Requested-With": "XMLHttpRequest",
         },
         body: JSON.stringify({
           email: email.toLowerCase().trim(),
@@ -81,7 +89,13 @@ export default function AdminLogin() {
 
       // Validate response structure
       if (!res.ok) {
-        setError(data.error || "Login failed. Please try again.");
+        // backend may return { error: 'msg' } or { error: { code, message } }
+        let msg = data.error || "Login failed. Please try again.";
+        if (msg && typeof msg === "object") {
+          // prefer message property, otherwise stringify
+          msg = msg.message || JSON.stringify(msg);
+        }
+        setError(msg);
         setLoading(false);
         return;
       }
@@ -98,10 +112,10 @@ export default function AdminLogin() {
         return;
       }
 
-      // Store token with expiration timestamp
-      const expiresAt = Date.now() + data.expiresIn * 1000;
-      localStorage.setItem("admin_token", data.token);
-      localStorage.setItem("admin_token_expires", expiresAt.toString());
+      // NOTE: the server has already set HTTP-only access/refresh cookies.
+      // We no longer persist tokens in localStorage.  The response still
+      // returns the access token for backward‑compatibility and automated
+      // tests which may inspect it.
 
       // Clear form
       setEmail("");
@@ -111,12 +125,15 @@ export default function AdminLogin() {
       // Redirect to dashboard
       Router.push("/admin/dashboard");
     } catch (err) {
-      // Error handled via setError state
+      console.error("Login fetch error", err);
+      // Provide more informative message when CORS or network issues occur
+      let message = "Connection failed. Please try again.";
       if (err instanceof TypeError) {
-        setError("Network error. Please check your connection and try again.");
-      } else {
-        setError("Connection failed. Please try again.");
+        message = "Network error. Check your connection or CORS configuration.";
+      } else if (err && err.message) {
+        message = err.message;
       }
+      setError(message);
       setLoading(false);
     }
   }
@@ -144,7 +161,7 @@ export default function AdminLogin() {
           <p className="text-gray-600 mb-8">Sign in to manage your store</p>
 
           {error && (
-            <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm font-medium animate-slideUp">
+            <div className="mb-6 p-4 bg-brand-light/20 border border-brand-light rounded-lg text-brand-dark text-sm font-medium animate-slideUp">
               <span className="inline-block mr-2">⚠️</span>
               {error}
             </div>
@@ -175,7 +192,9 @@ export default function AdminLogin() {
                 autoComplete="email"
               />
               {fieldErrors.email && (
-                <p className="mt-2 text-sm text-red-600">{fieldErrors.email}</p>
+                <p className="mt-2 text-sm text-brand-dark">
+                  {fieldErrors.email}
+                </p>
               )}
             </div>
 

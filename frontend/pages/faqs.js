@@ -19,7 +19,7 @@ export default function FAQs() {
       id: 3,
       question: "How long does delivery take?",
       answer:
-        "Nairobi & Thika: Same day or next day. Other towns: 1 – 3 working days",
+        "Within Nairobi CBD: Same day or next day. Other towns: 1 – 3 working days. Delivery fees may apply outside CBD",
     },
     {
       id: 4,

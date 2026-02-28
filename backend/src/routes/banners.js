@@ -35,7 +35,12 @@ router.get("/", async (req, res) => {
     res.json(banners);
   } catch (err) {
     logger.error("Error fetching banners:", { message: err.message });
-    res.status(500).json({ error: "Failed to fetch banners" });
+    res
+      .status(500)
+      .json({
+        success: false,
+        error: { code: "INTERNAL_ERROR", message: "Failed to fetch banners" },
+      });
   }
 });
 
@@ -44,7 +49,12 @@ router.get("/:id", async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     if (isNaN(id) || id <= 0) {
-      return res.status(400).json({ error: "Invalid banner ID" });
+      return res
+        .status(400)
+        .json({
+          success: false,
+          error: { code: "VALIDATION_FAILED", message: "Invalid banner ID" },
+        });
     }
 
     const banner = await prisma.banner.findUnique({
@@ -52,13 +62,23 @@ router.get("/:id", async (req, res) => {
     });
 
     if (!banner) {
-      return res.status(404).json({ error: "Banner not found" });
+      return res
+        .status(404)
+        .json({
+          success: false,
+          error: { code: "NOT_FOUND", message: "Banner not found" },
+        });
     }
 
     res.json(banner);
   } catch (err) {
     logger.error("Error fetching banner:", { message: err.message });
-    res.status(500).json({ error: "Failed to fetch banner" });
+    res
+      .status(500)
+      .json({
+        success: false,
+        error: { code: "INTERNAL_ERROR", message: "Failed to fetch banner" },
+      });
   }
 });
 
@@ -69,7 +89,14 @@ router.post("/", adminAuth, async (req, res) => {
     if (errors) {
       return res
         .status(400)
-        .json({ error: "Validation failed", details: errors });
+        .json({
+          success: false,
+          error: {
+            code: "VALIDATION_FAILED",
+            message: "Validation failed",
+            details: errors,
+          },
+        });
     }
 
     const {
@@ -114,7 +141,12 @@ router.post("/", adminAuth, async (req, res) => {
     res.status(201).json(banner);
   } catch (err) {
     logger.error("Error creating banner:", { message: err.message });
-    res.status(500).json({ error: "Failed to create banner" });
+    res
+      .status(500)
+      .json({
+        success: false,
+        error: { code: "INTERNAL_ERROR", message: "Failed to create banner" },
+      });
   }
 });
 
@@ -123,13 +155,23 @@ router.put("/:id", adminAuth, async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     if (isNaN(id) || id <= 0) {
-      return res.status(400).json({ error: "Invalid banner ID" });
+      return res
+        .status(400)
+        .json({
+          success: false,
+          error: { code: "VALIDATION_FAILED", message: "Invalid banner ID" },
+        });
     }
 
     // Verify banner exists
     const existingBanner = await prisma.banner.findUnique({ where: { id } });
     if (!existingBanner) {
-      return res.status(404).json({ error: "Banner not found" });
+      return res
+        .status(404)
+        .json({
+          success: false,
+          error: { code: "NOT_FOUND", message: "Banner not found" },
+        });
     }
 
     const {
@@ -149,7 +191,13 @@ router.put("/:id", adminAuth, async (req, res) => {
       if (typeof title !== "string" || title.trim().length < 1) {
         return res
           .status(400)
-          .json({ error: "Title must be a non-empty string" });
+          .json({
+            success: false,
+            error: {
+              code: "VALIDATION_FAILED",
+              message: "Title must be a non-empty string",
+            },
+          });
       }
       update.title = title.trim().substring(0, 255);
     }
@@ -205,7 +253,12 @@ router.put("/:id", adminAuth, async (req, res) => {
     res.json(banner);
   } catch (err) {
     logger.error("Error updating banner:", { message: err.message });
-    res.status(500).json({ error: "Failed to update banner" });
+    res
+      .status(500)
+      .json({
+        success: false,
+        error: { code: "INTERNAL_ERROR", message: "Failed to update banner" },
+      });
   }
 });
 
@@ -214,14 +267,24 @@ router.delete("/:id", adminAuth, async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     if (isNaN(id) || id <= 0) {
-      return res.status(400).json({ error: "Invalid banner ID" });
+      return res
+        .status(400)
+        .json({
+          success: false,
+          error: { code: "VALIDATION_FAILED", message: "Invalid banner ID" },
+        });
     }
 
     await prisma.banner.delete({ where: { id } });
     res.json({ success: true });
   } catch (err) {
     logger.error("Error deleting banner:", { message: err.message });
-    res.status(500).json({ error: "Failed to delete banner" });
+    res
+      .status(500)
+      .json({
+        success: false,
+        error: { code: "INTERNAL_ERROR", message: "Failed to delete banner" },
+      });
   }
 });
 

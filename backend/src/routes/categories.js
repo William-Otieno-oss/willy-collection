@@ -38,7 +38,15 @@ router.get("/", async (req, res) => {
     res.json(categories);
   } catch (err) {
     logger.error("Error fetching categories:", { message: err.message });
-    res.status(500).json({ error: "Failed to fetch categories" });
+    res
+      .status(500)
+      .json({
+        success: false,
+        error: {
+          code: "INTERNAL_ERROR",
+          message: "Failed to fetch categories",
+        },
+      });
   }
 });
 
@@ -59,7 +67,15 @@ router.get("/featured", async (req, res) => {
     logger.error("Error fetching featured categories:", {
       message: err.message,
     });
-    res.status(500).json({ error: "Failed to fetch featured categories" });
+    res
+      .status(500)
+      .json({
+        success: false,
+        error: {
+          code: "INTERNAL_ERROR",
+          message: "Failed to fetch featured categories",
+        },
+      });
   }
 });
 
@@ -69,7 +85,12 @@ router.get("/:slug", async (req, res) => {
     const { slug } = req.params;
 
     if (!slug || typeof slug !== "string") {
-      return res.status(400).json({ error: "Invalid slug" });
+      return res
+        .status(400)
+        .json({
+          success: false,
+          error: { code: "VALIDATION_FAILED", message: "Invalid slug" },
+        });
     }
 
     const category = await prisma.category.findUnique({
@@ -82,13 +103,23 @@ router.get("/:slug", async (req, res) => {
     });
 
     if (!category) {
-      return res.status(404).json({ error: "Category not found" });
+      return res
+        .status(404)
+        .json({
+          success: false,
+          error: { code: "NOT_FOUND", message: "Category not found" },
+        });
     }
 
     res.json(category);
   } catch (err) {
     logger.error("Error fetching category:", { message: err.message });
-    res.status(500).json({ error: "Failed to fetch category" });
+    res
+      .status(500)
+      .json({
+        success: false,
+        error: { code: "INTERNAL_ERROR", message: "Failed to fetch category" },
+      });
   }
 });
 
@@ -99,15 +130,26 @@ router.post("/", adminAuth, async (req, res) => {
 
     const validName = validateCategoryName(name);
     if (!validName) {
-      return res.status(400).json({
-        error: "Category name is required and must be a non-empty string",
-      });
+      return res
+        .status(400)
+        .json({
+          success: false,
+          error: {
+            code: "VALIDATION_FAILED",
+            message: "Category name is required and must be a non-empty string",
+          },
+        });
     }
 
     const finalSlug = slug ? validateSlug(slug) : validateSlug(validName);
 
     if (!finalSlug) {
-      return res.status(400).json({ error: "Invalid slug" });
+      return res
+        .status(400)
+        .json({
+          success: false,
+          error: { code: "VALIDATION_FAILED", message: "Invalid slug" },
+        });
     }
 
     const category = await prisma.category.create({
@@ -131,7 +173,12 @@ router.post("/", adminAuth, async (req, res) => {
     res.status(201).json(category);
   } catch (err) {
     logger.error("Error creating category:", { message: err.message });
-    res.status(500).json({ error: "Failed to create category" });
+    res
+      .status(500)
+      .json({
+        success: false,
+        error: { code: "INTERNAL_ERROR", message: "Failed to create category" },
+      });
   }
 });
 
@@ -140,7 +187,12 @@ router.put("/:id", adminAuth, async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     if (isNaN(id) || id <= 0) {
-      return res.status(400).json({ error: "Invalid category ID" });
+      return res
+        .status(400)
+        .json({
+          success: false,
+          error: { code: "VALIDATION_FAILED", message: "Invalid category ID" },
+        });
     }
 
     // Verify category exists
@@ -148,7 +200,12 @@ router.put("/:id", adminAuth, async (req, res) => {
       where: { id },
     });
     if (!existingCategory) {
-      return res.status(404).json({ error: "Category not found" });
+      return res
+        .status(404)
+        .json({
+          success: false,
+          error: { code: "NOT_FOUND", message: "Category not found" },
+        });
     }
 
     const { name, slug, icon, description, order, featured } = req.body;
@@ -159,7 +216,13 @@ router.put("/:id", adminAuth, async (req, res) => {
       if (!validName) {
         return res
           .status(400)
-          .json({ error: "Category name must be a non-empty string" });
+          .json({
+            success: false,
+            error: {
+              code: "VALIDATION_FAILED",
+              message: "Category name must be a non-empty string",
+            },
+          });
       }
       update.name = validName;
     }
@@ -167,7 +230,12 @@ router.put("/:id", adminAuth, async (req, res) => {
     if (slug !== undefined) {
       const validSlug = validateSlug(slug);
       if (!validSlug) {
-        return res.status(400).json({ error: "Invalid slug" });
+        return res
+          .status(400)
+          .json({
+            success: false,
+            error: { code: "VALIDATION_FAILED", message: "Invalid slug" },
+          });
       }
       update.slug = validSlug;
     }
@@ -201,7 +269,12 @@ router.put("/:id", adminAuth, async (req, res) => {
     res.json(category);
   } catch (err) {
     logger.error("Error updating category:", { message: err.message });
-    res.status(500).json({ error: "Failed to update category" });
+    res
+      .status(500)
+      .json({
+        success: false,
+        error: { code: "INTERNAL_ERROR", message: "Failed to update category" },
+      });
   }
 });
 
@@ -210,14 +283,24 @@ router.delete("/:id", adminAuth, async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     if (isNaN(id) || id <= 0) {
-      return res.status(400).json({ error: "Invalid category ID" });
+      return res
+        .status(400)
+        .json({
+          success: false,
+          error: { code: "VALIDATION_FAILED", message: "Invalid category ID" },
+        });
     }
 
     await prisma.category.delete({ where: { id } });
     res.json({ success: true });
   } catch (err) {
     logger.error("Error deleting category:", { message: err.message });
-    res.status(500).json({ error: "Failed to delete category" });
+    res
+      .status(500)
+      .json({
+        success: false,
+        error: { code: "INTERNAL_ERROR", message: "Failed to delete category" },
+      });
   }
 });
 
@@ -228,11 +311,24 @@ router.post("/:categoryId/mega-menu", adminAuth, async (req, res) => {
     const { title, link, icon, order } = req.body;
 
     if (isNaN(categoryId) || categoryId <= 0) {
-      return res.status(400).json({ error: "Invalid category ID" });
+      return res
+        .status(400)
+        .json({
+          success: false,
+          error: { code: "VALIDATION_FAILED", message: "Invalid category ID" },
+        });
     }
 
     if (!title || typeof title !== "string") {
-      return res.status(400).json({ error: "Menu title is required" });
+      return res
+        .status(400)
+        .json({
+          success: false,
+          error: {
+            code: "VALIDATION_FAILED",
+            message: "Menu title is required",
+          },
+        });
     }
 
     // Verify category exists
@@ -240,7 +336,12 @@ router.post("/:categoryId/mega-menu", adminAuth, async (req, res) => {
       where: { id: categoryId },
     });
     if (!category) {
-      return res.status(404).json({ error: "Category not found" });
+      return res
+        .status(404)
+        .json({
+          success: false,
+          error: { code: "NOT_FOUND", message: "Category not found" },
+        });
     }
 
     const item = await prisma.megaMenuItem.create({
@@ -262,7 +363,15 @@ router.post("/:categoryId/mega-menu", adminAuth, async (req, res) => {
     res.status(201).json(item);
   } catch (err) {
     logger.error("Error creating mega-menu item:", { message: err.message });
-    res.status(500).json({ error: "Failed to create mega-menu item" });
+    res
+      .status(500)
+      .json({
+        success: false,
+        error: {
+          code: "INTERNAL_ERROR",
+          message: "Failed to create mega-menu item",
+        },
+      });
   }
 });
 
@@ -271,7 +380,12 @@ router.put("/mega-menu/:itemId", adminAuth, async (req, res) => {
   try {
     const itemId = parseInt(req.params.itemId);
     if (isNaN(itemId) || itemId <= 0) {
-      return res.status(400).json({ error: "Invalid menu item ID" });
+      return res
+        .status(400)
+        .json({
+          success: false,
+          error: { code: "VALIDATION_FAILED", message: "Invalid menu item ID" },
+        });
     }
 
     const { title, link, icon, order } = req.body;
@@ -281,7 +395,13 @@ router.put("/mega-menu/:itemId", adminAuth, async (req, res) => {
       if (!title || typeof title !== "string") {
         return res
           .status(400)
-          .json({ error: "Menu title must be a non-empty string" });
+          .json({
+            success: false,
+            error: {
+              code: "VALIDATION_FAILED",
+              message: "Menu title must be a non-empty string",
+            },
+          });
       }
       update.title = title.trim().substring(0, 255);
     }
@@ -310,7 +430,15 @@ router.put("/mega-menu/:itemId", adminAuth, async (req, res) => {
     res.json(item);
   } catch (err) {
     logger.error("Error updating mega-menu item:", { message: err.message });
-    res.status(500).json({ error: "Failed to update mega-menu item" });
+    res
+      .status(500)
+      .json({
+        success: false,
+        error: {
+          code: "INTERNAL_ERROR",
+          message: "Failed to update mega-menu item",
+        },
+      });
   }
 });
 
@@ -319,14 +447,27 @@ router.delete("/mega-menu/:itemId", adminAuth, async (req, res) => {
   try {
     const itemId = parseInt(req.params.itemId);
     if (isNaN(itemId) || itemId <= 0) {
-      return res.status(400).json({ error: "Invalid menu item ID" });
+      return res
+        .status(400)
+        .json({
+          success: false,
+          error: { code: "VALIDATION_FAILED", message: "Invalid menu item ID" },
+        });
     }
 
     await prisma.megaMenuItem.delete({ where: { id: itemId } });
     res.json({ success: true });
   } catch (err) {
     logger.error("Error deleting mega-menu item:", { message: err.message });
-    res.status(500).json({ error: "Failed to delete mega-menu item" });
+    res
+      .status(500)
+      .json({
+        success: false,
+        error: {
+          code: "INTERNAL_ERROR",
+          message: "Failed to delete mega-menu item",
+        },
+      });
   }
 });
 

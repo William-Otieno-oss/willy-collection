@@ -22,27 +22,24 @@ export default function OffersSection() {
   if (offers.length === 0) return null;
 
   return (
-    <section className="py-20 px-4 bg-white">
+    <section className="py-32 px-4 sm:px-6 bg-white">
       <div className="max-w-7xl mx-auto">
-        <div className="flex flex-col md:flex-row md:justify-between md:items-end mb-16">
+        <div className="flex flex-col md:flex-row md:justify-between md:items-end mb-20">
           <div>
-            <span className="text-sm font-semibold text-red-500 uppercase tracking-widest">
+            <span className="text-sm font-semibold text-error uppercase tracking-widest">
               Limited time
             </span>
-            <h2
-              className="text-4xl md:text-5xl font-display font-bold mt-3"
-              style={{ color: "#1c140c" }}
-            >
+            <h2 className="text-5xl font-semibold mt-4 text-neutral-900">
               Exclusive Offers
             </h2>
           </div>
           <Link href="/offers">
-            <button className="mt-6 md:mt-0 px-8 py-3 bg-accent hover:bg-orange-600 text-gray-900 font-semibold rounded-lg transition-all duration-300 transform hover:scale-105 shadow-lg">
+            <button className="mt-6 md:mt-0 px-8 py-3.5 bg-brand text-brand-dark font-medium rounded-sm shadow-xs hover:shadow-sm hover:bg-brand-light transition-all duration-200">
               View All Deals →
             </button>
           </Link>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-8">
           {offers.slice(0, 8).map((s, idx) => (
             <div
               key={s.id}

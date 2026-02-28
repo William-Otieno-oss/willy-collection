@@ -1,0 +1,18 @@
+{
+  "status": "commited",
+  "type": "backend",
+  "scope": "codebase",
+  "localEndpoint": "http://localhost:3000/C:\\Data\\Willy Collection website",
+  "backendAuthType": "public",
+  "executionArgs": {
+    "projectName": "Willy Collection website",
+    "projectPath": "c:\\Data\\Willy Collection website",
+    "testIds": [],
+    "additionalInstruction": "Re-run all backend tests after recent fixes (auth seeding, sneakers response shape, orders payload compatibility, readiness page, and scoped rate limiting).",
+    "envs": {
+      "API_KEY": "sk-user-54J_hCvac2xfxC0f1WSjZUFyAc4XHRibjJV9IPyoKYuSclDi59hJsPLCH-el6MBtyUa7cWkLP6uzcSfLCqPPCug7l-a8z91SEiMTwxrdA4OsqF0r-S1Ar8z5yZqNmqFwYYk"
+    }
+  },
+  "serverPort": 62155,
+  "proxy": "http://75fe28ed-3961-4ac1-8065-f187ef5f15c5:oGPT6j3mJlvSPdMEqYncMvXBsX5z9YpD@tun.testsprite.com:8080"
+}

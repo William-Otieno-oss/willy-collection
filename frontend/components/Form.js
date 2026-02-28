@@ -1,15 +1,15 @@
 export function FormGroup({ children, className = "" }) {
-  return <div className={`mb-6 ${className}`}>{children}</div>;
+  return <div className={`mb-7 ${className}`}>{children}</div>;
 }
 
 export function FormLabel({ htmlFor, children, required = false }) {
   return (
     <label
       htmlFor={htmlFor}
-      className="block text-sm font-medium text-gray-700 mb-2"
+      className="block text-sm font-medium text-neutral-700 mb-2.5"
     >
       {children}
-      {required && <span className="text-red-500 ml-1">*</span>}
+      {required && <span className="text-error ml-1.5">*</span>}
     </label>
   );
 }
@@ -30,12 +30,10 @@ export function FormInput({
       )}
       <input
         {...props}
-        className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent outline-none transition ${
-          error ? "border-red-500" : "border-gray-300"
-        }`}
+        className={`form-input ${error ? "border-error focus:ring-error focus:border-error" : ""}`}
       />
-      {error && <p className="text-red-500 text-sm mt-1">{error}</p>}
-      {helperText && <p className="text-gray-500 text-sm mt-1">{helperText}</p>}
+      {error && <p className="form-error">{error}</p>}
+      {helperText && <p className="form-helper">{helperText}</p>}
     </FormGroup>
   );
 }
@@ -56,9 +54,7 @@ export function FormSelect({
       )}
       <select
         {...props}
-        className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent outline-none transition ${
-          error ? "border-red-500" : "border-gray-300"
-        }`}
+        className={`form-input ${error ? "border-error focus:ring-error focus:border-error" : ""}`}
       >
         {options.map((opt) => (
           <option key={opt.value} value={opt.value}>
@@ -66,7 +62,7 @@ export function FormSelect({
           </option>
         ))}
       </select>
-      {error && <p className="text-red-500 text-sm mt-1">{error}</p>}
+      {error && <p className="form-error">{error}</p>}
     </FormGroup>
   );
 }
@@ -81,11 +77,9 @@ export function FormTextarea({ label, error, required = false, ...props }) {
       )}
       <textarea
         {...props}
-        className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent outline-none transition resize-none ${
-          error ? "border-red-500" : "border-gray-300"
-        }`}
+        className={`form-input resize-none ${error ? "border-error focus:ring-error focus:border-error" : ""}`}
       />
-      {error && <p className="text-red-500 text-sm mt-1">{error}</p>}
+      {error && <p className="form-error">{error}</p>}
     </FormGroup>
   );
 }
@@ -97,11 +91,11 @@ export function FormCheckbox({ label, error, ...props }) {
         <input
           type="checkbox"
           {...props}
-          className="w-4 h-4 border-gray-300 rounded focus:ring-2 focus:ring-amber-500"
+          className="w-4 h-4 border-neutral-300 rounded focus:ring-2 focus:ring-brand"
         />
-        <span className="text-sm font-medium text-gray-700">{label}</span>
+        <span className="text-sm font-medium text-neutral-700">{label}</span>
       </label>
-      {error && <p className="text-red-500 text-sm mt-1">{error}</p>}
+      {error && <p className="form-error">{error}</p>}
     </FormGroup>
   );
 }

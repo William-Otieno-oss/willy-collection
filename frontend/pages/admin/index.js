@@ -6,17 +6,22 @@ export default function AdminIndex() {
   const router = useRouter();
 
   useEffect(() => {
-    // Check if authenticated
-    const token = localStorage.getItem("admin_token");
-    const expiresAt = localStorage.getItem("admin_token_expires");
-
-    if (token && expiresAt && parseInt(expiresAt) > Date.now()) {
-      // Token is valid, go to dashboard
-      router.push("/admin/dashboard");
-    } else {
-      // Token missing or expired, go to login
-      router.push("/admin/login");
-    }
+    // Ping a protected endpoint to determine authentication state
+    const check = async () => {
+      try {
+        const resp = await fetch("/api/orders?limit=1", {
+          credentials: "include",
+        });
+        if (resp.ok) {
+          router.push("/admin/dashboard");
+        } else {
+          router.push("/admin/login");
+        }
+      } catch {
+        router.push("/admin/login");
+      }
+    };
+    check();
   }, [router]);
 
   return (

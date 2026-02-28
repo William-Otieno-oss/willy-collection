@@ -8,32 +8,32 @@ datasource db {
 }
 
 model User {
-  id        Int     @id @default(autoincrement())
-  email     String  @unique
+  id        Int      @id @default(autoincrement())
+  email     String   @unique
   password  String
   name      String?
-  isAdmin   Boolean @default(false)
+  isAdmin   Boolean  @default(false)
   createdAt DateTime @default(now())
-  
+
   @@index([email])
 }
 
 model Sneaker {
-  id          Int       @id @default(autoincrement())
+  id          Int            @id @default(autoincrement())
   brandId     Int
-  brand       Brand     @relation(fields: [brandId], references: [id])
+  brand       Brand          @relation(fields: [brandId], references: [id])
   modelName   String
-  slug        String    @unique
+  slug        String         @unique
   description String?
   price       Float
-  categories  String    @default("[]")
-  colors      String    @default("[]")
-  featured    Boolean   @default(false)
-  inStock     Boolean   @default(true)
+  categories  String         @default("[]")
+  colors      String         @default("[]")
+  featured    Boolean        @default(false)
+  inStock     Boolean        @default(true)
   images      SneakerImage[]
   stocks      Stock[]
-  createdAt   DateTime  @default(now())
-  
+  createdAt   DateTime       @default(now())
+
   @@index([slug])
   @@index([brandId])
   @@index([featured])
@@ -42,23 +42,23 @@ model Sneaker {
 }
 
 model SneakerImage {
-  id        Int     @id @default(autoincrement())
+  id         Int     @id @default(autoincrement())
   url        String
   filename   String?
   s3Key      String?
   checksum   String?
-  scanStatus String?   @default("pending")
-  order      Int?      @map("order_index")
+  scanStatus String? @default("pending")
+  order      Int?    @map("order_index")
   sneaker    Sneaker @relation(fields: [sneakerId], references: [id], onDelete: Cascade)
   sneakerId  Int
-  
+
   @@index([sneakerId])
   @@index([scanStatus])
 }
 
 model Size {
-  id    Int    @id @default(autoincrement())
-  name  String @unique
+  id     Int     @id @default(autoincrement())
+  name   String  @unique
   stocks Stock[]
 }
 
@@ -69,38 +69,41 @@ model Stock {
   size      Size    @relation(fields: [sizeId], references: [id], onDelete: Cascade)
   sizeId    Int
   quantity  Int
-  
+
   @@unique([sneakerId, sizeId])
   @@index([sneakerId])
   @@index([sizeId])
 }
 
 model Order {
-  id           Int        @id @default(autoincrement())
-  customerName String
-  phone        String
-  location     String
-  delivery     String
+  id            Int         @id @default(autoincrement())
+  customerName  String
+  phone         String
+  location      String
+  delivery      String
   paymentMethod String
-  status       String     @default("Pending")
-  createdAt    DateTime   @default(now())
-  items        OrderItem[]
-  
+  status        String      @default("Pending")
+  createdAt     DateTime    @default(now())
+  items         OrderItem[]
+
+  // one-to-one relation with Payment (optional)
+  payment Payment?
+
   @@index([status])
   @@index([createdAt])
 }
 
 model OrderItem {
-  id         Int     @id @default(autoincrement())
-  order      Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  orderId    Int
-  sneakerId  Int
+  id          Int    @id @default(autoincrement())
+  order       Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderId     Int
+  sneakerId   Int
   sneakerName String
-  size       String
-  color      String
-  price      Float
-  quantity   Int
-  
+  size        String
+  color       String
+  price       Float
+  quantity    Int
+
   @@index([orderId])
 }
 
@@ -111,66 +114,79 @@ model SiteSettings {
 }
 
 model Banner {
-  id          Int       @id @default(autoincrement())
+  id          Int      @id @default(autoincrement())
   title       String
   subtitle    String?
   description String?
   imageUrl    String
   link        String?
-  ctaText     String?   @default("Shop Now")
-  order       Int       @default(0)
-  active      Boolean   @default(true)
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  
+  ctaText     String?  @default("Shop Now")
+  order       Int      @default(0)
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
   @@index([active])
   @@index([order])
 }
 
 model Category {
-  id          Int            @id @default(autoincrement())
-  name        String
-  slug        String         @unique
-  icon        String?
-  description String?
-  order       Int            @default(0)
-  featured    Boolean        @default(false)
+  id            Int            @id @default(autoincrement())
+  name          String
+  slug          String         @unique
+  icon          String?
+  description   String?
+  order         Int            @default(0)
+  featured      Boolean        @default(false)
   megaMenuItems MegaMenuItem[]
-  createdAt   DateTime       @default(now())
-  updatedAt   DateTime       @updatedAt
-  
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
   @@index([slug])
   @@index([featured])
   @@index([order])
 }
 
 model MegaMenuItem {
-  id          Int       @id @default(autoincrement())
-  title       String
-  link        String?
-  icon        String?
-  order       Int       @default(0)
-  category    Category  @relation(fields: [categoryId], references: [id], onDelete: Cascade)
-  categoryId  Int
-  createdAt   DateTime  @default(now())
-  
+  id         Int      @id @default(autoincrement())
+  title      String
+  link       String?
+  icon       String?
+  order      Int      @default(0)
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  categoryId Int
+  createdAt  DateTime @default(now())
+
   @@index([categoryId])
   @@index([order])
 }
 
 model Brand {
-  id         Int       @id @default(autoincrement())
-  name       String    @unique
-  slug       String    @unique
+  id          Int       @id @default(autoincrement())
+  name        String    @unique
+  slug        String    @unique
   description String?
-  imageUrl   String?
-  order      Int       @default(0)
-  featured   Boolean   @default(false)
-  sneakers   Sneaker[]
-  createdAt  DateTime  @default(now())
-  updatedAt  DateTime  @updatedAt
-  
+  imageUrl    String?
+  order       Int       @default(0)
+  featured    Boolean   @default(false)
+  sneakers    Sneaker[]
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
   @@index([slug])
   @@index([featured])
   @@index([order])
+}
+
+// Payments associated with orders (MPESA/STK push tracking)
+model Payment {
+  id                Int      @id @default(autoincrement())
+  order             Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderId           Int      @unique
+  mpesaNumber       String
+  amount            Float
+  checkoutRequestId String?  @unique
+  status            String   @default("pending")
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 }

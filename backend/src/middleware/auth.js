@@ -8,24 +8,31 @@ if (!jwtSecret) {
 
 function adminAuth(req, res, next) {
   try {
-    // Validate Authorization header exists and is properly formatted
+    // Support Bearer header or HTTP-only cookie for access token
+    let token;
     const auth = req.headers.authorization;
-    if (!auth || typeof auth !== "string") {
+    if (auth && typeof auth === "string") {
+      const parts = auth.split(" ");
+      if (parts.length === 2 && parts[0] === "Bearer") {
+        token = parts[1];
+      } else {
+        logger.warn("Invalid authorization format attempt", { path: req.path });
+        return res.status(401).json({
+          error: "Invalid authorization format. Expected: Bearer <token>",
+        });
+      }
+    }
+
+    // If no header token, try cookie
+    if (!token && req.cookies && req.cookies.access_token) {
+      token = req.cookies.access_token;
+    }
+
+    if (!token || typeof token !== "string") {
       return res
         .status(401)
-        .json({ error: "Missing or invalid authorization header" });
+        .json({ error: "Missing or invalid authorization token" });
     }
-
-    // Extract token from "Bearer <token>" format
-    const parts = auth.split(" ");
-    if (parts.length !== 2 || parts[0] !== "Bearer") {
-      logger.warn("Invalid authorization format attempt", { path: req.path });
-      return res.status(401).json({
-        error: "Invalid authorization format. Expected: Bearer <token>",
-      });
-    }
-
-    const token = parts[1];
 
     // Verify token is not empty
     if (!token || token.trim() === "" || token.length > 500) {

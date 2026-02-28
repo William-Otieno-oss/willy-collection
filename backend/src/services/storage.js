@@ -1,3 +1,6 @@
+// Ensure environment variables are loaded before initializing the S3 client
+require("dotenv").config();
+
 const {
   S3Client,
   PutObjectCommand,
@@ -21,7 +24,20 @@ const S3_ENDPOINT =
 
 let s3client = null;
 
+function isConfigured() {
+  return !!s3client;
+}
+
 // Initialize S3 client if credentials are available
+// Log presence of key environment vars (do NOT log secret values)
+logger.info("S3 environment variables", {
+  hasAccessKey: !!process.env.AWS_ACCESS_KEY_ID,
+  hasSecretKey: !!process.env.AWS_SECRET_ACCESS_KEY,
+  region: REGION,
+  bucket: BUCKET,
+  endpoint: S3_ENDPOINT || "",
+});
+
 if (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) {
   const opts = {
     region: REGION,
@@ -38,6 +54,11 @@ if (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) {
   }
 
   s3client = new S3Client(opts);
+  logger.info("Initialized S3 client", {
+    region: REGION,
+    bucket: BUCKET,
+    endpoint: S3_ENDPOINT || "",
+  });
 
   // Ensure bucket exists (best-effort, non-blocking)
   (async () => {
@@ -83,17 +104,31 @@ async function uploadBufferToS3(buffer, key, contentType) {
       Key: key,
       Body: buffer,
       ContentType: contentType,
+      // Try to set public read by default so URLs are accessible; if your
+      // bucket blocks ACLs this will be ignored by AWS.
+      ACL: "public-read",
       Metadata: {
         "upload-date": new Date().toISOString(),
       },
     });
 
     await s3client.send(cmd);
-    return { bucket: BUCKET, key };
+    // Build a stable public URL to return
+    const url = getPublicUrl(key);
+    return { bucket: BUCKET, key, url };
   } catch (err) {
     logger.error("S3 upload error", { message: err.message, key });
     throw new Error(`Failed to upload to S3: ${err.message}`);
   }
+}
+
+function getPublicUrl(key) {
+  if (!key) return null;
+  if (S3_ENDPOINT) {
+    const endpoint = String(S3_ENDPOINT).replace(/\/$/, "");
+    return `${endpoint}/${BUCKET}/${key}`;
+  }
+  return `https://${BUCKET}.s3.${REGION}.amazonaws.com/${key}`;
 }
 
 async function getPresignedPutUrl(key, contentType, expiresSeconds = 3600) {
@@ -208,4 +243,6 @@ module.exports = {
   headObject,
   deleteObject,
   getObjectBuffer,
+  isConfigured,
+  getPublicUrl,
 };

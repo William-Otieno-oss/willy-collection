@@ -1,0 +1,47 @@
+[
+  {
+    "id": "TC001",
+    "title": "post api auth login with valid admin credentials",
+    "description": "Test the POST /api/auth/login endpoint with valid admin email and password to verify it returns a 200 status with a JWT token and admin profile."
+  },
+  {
+    "id": "TC002",
+    "title": "get api sneakers with filters",
+    "description": "Test the GET /api/sneakers endpoint with various query parameters such as brand, category, and search term to verify it returns a 200 status with a filtered array of sneaker objects."
+  },
+  {
+    "id": "TC003",
+    "title": "post api orders with valid order data",
+    "description": "Test the POST /api/orders endpoint with a valid order payload including items, customerName, phone, and address to verify it creates an order and returns a 201 status with the order object."
+  },
+  {
+    "id": "TC004",
+    "title": "post api admin sneakers with valid jwt and product data",
+    "description": "Test the POST /api/admin/sneakers endpoint with a valid JWT token and valid product data to verify it creates or updates a sneaker product and returns a 200 status with the sneaker object."
+  },
+  {
+    "id": "TC005",
+    "title": "post api s3 presign with valid jwt and filename",
+    "description": "Test the POST /api/s3/presign endpoint with a valid JWT token and valid filename and contentType in the request body to verify it returns a 200 status with presigned upload information."
+  },
+  {
+    "id": "TC006",
+    "title": "get api health returns uptime and health info",
+    "description": "Test the GET /api/health endpoint to verify it returns a 200 status with uptime and basic health information in JSON format."
+  },
+  {
+    "id": "TC007",
+    "title": "get ready returns 200 when db is reachable",
+    "description": "Test the GET /ready endpoint when the database is reachable to verify it returns a 200 status indicating readiness."
+  },
+  {
+    "id": "TC008",
+    "title": "get ready returns 503 when db is unavailable",
+    "description": "Test the GET /ready endpoint when the database is unavailable to verify it returns a 503 status indicating the database is unavailable."
+  },
+  {
+    "id": "TC009",
+    "title": "rate limiting enforces 100 requests per 15 minutes per ip",
+    "description": "Test the global rate limiting by sending repeated requests to GET /api/sneakers from the same IP to verify that up to 100 requests succeed with 200 status and the 101st request returns a 429 rate limit exceeded error."
+  }
+]

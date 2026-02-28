@@ -4,7 +4,18 @@ import { useState } from "react";
 import Layout from "../../components/Layout";
 import API_BASE, { getImageUrl } from "../../lib/api";
 
-const fetcher = (url) => fetch(url).then((r) => r.json());
+const fetcher = async (url) => {
+  const res = await fetch(url);
+  const data = await res.json();
+  if (!res.ok || (data && data.success === false && data.error)) {
+    const err = new Error(
+      (data && data.error && data.error.message) || "Failed to fetch product",
+    );
+    err.status = res.status;
+    throw err;
+  }
+  return data;
+};
 
 export default function ProductPage() {
   const router = useRouter();
@@ -12,21 +23,47 @@ export default function ProductPage() {
   const [selectedSize, setSelectedSize] = useState("");
   const [addingToCart, setAddingToCart] = useState(false);
   const [cartMessage, setCartMessage] = useState("");
+  const [quantity, setQuantity] = useState(1);
 
-  const { data } = useSWR(
+  // product variable will be set below once data has loaded
+
+  const { data, error } = useSWR(
     () => (slug ? `${API_BASE}/api/sneakers/${slug}` : null),
     fetcher,
   );
 
   const product = data;
+  const hasStock = product?.stocks && product.stocks.length > 0;
+
+  // Show error state if fetch fails
+  if (error) {
+    return (
+      <Layout>
+        <div className="flex justify-center items-center min-h-96">
+          <p className="text-red-600 font-semibold">
+            {error.message || "Failed to load product"}
+          </p>
+        </div>
+      </Layout>
+    );
+  }
 
   const getBrandName = (brand) => {
     return typeof brand === "object" ? brand?.name : brand;
   };
 
   const handleAddToCart = () => {
+    if (!hasStock) {
+      setCartMessage("No sizes available for this product");
+      return;
+    }
     if (!selectedSize) {
       setCartMessage("Please select a size");
+      return;
+    }
+
+    if (!quantity || Number(quantity) < 1) {
+      setCartMessage("Please select quantity");
       return;
     }
 
@@ -47,7 +84,7 @@ export default function ProductPage() {
         modelName: product.modelName,
         price: product.price,
         size: selectedSize,
-        quantity: 1,
+        quantity: Number(quantity),
         brand: product.brand,
         image: product.images?.[0]?.url,
         slug: product.slug,
@@ -59,7 +96,7 @@ export default function ProductPage() {
       );
 
       if (existingItem) {
-        existingItem.quantity += 1;
+        existingItem.quantity += Number(quantity);
       } else {
         cart.push(cartItem);
       }
@@ -76,6 +113,7 @@ export default function ProductPage() {
       setTimeout(() => {
         setCartMessage("");
         setSelectedSize("");
+        setQuantity(1);
       }, 2000);
     } catch (e) {
       // Error silently handled, user sees notification via setError()
@@ -103,7 +141,12 @@ export default function ProductPage() {
                 <img
                   src={getImageUrl(product.images[0].url)}
                   alt={`${getBrandName(product.brand)} ${product.modelName}`}
+                  loading="lazy"
+                  decoding="async"
                   className="w-full h-96 object-cover"
+                  onError={(e) => {
+                    e.target.src = "/placeholder.png";
+                  }}
                 />
               ) : (
                 <div className="w-full h-96 bg-gray-200 flex items-center justify-center text-gray-400">
@@ -121,7 +164,12 @@ export default function ProductPage() {
                     <img
                       src={getImageUrl(img.url)}
                       alt="Thumbnail"
+                      loading="lazy"
+                      decoding="async"
                       className="w-full h-24 object-cover hover:opacity-75 transition-opacity cursor-pointer"
+                      onError={(e) => {
+                        e.target.src = "/placeholder.png";
+                      }}
                     />
                   </div>
                 ))}
@@ -163,16 +211,27 @@ export default function ProductPage() {
               </div>
             )}
 
-            {/* Size Selector */}
-            {product.stocks && product.stocks.length > 0 && (
+            {/* Size Selector or message */}
+            {hasStock ? (
               <div className="mb-6">
                 <h3 className="font-semibold text-gray-900 mb-3">
                   Select Size
                 </h3>
                 <div className="grid grid-cols-4 gap-2">
                   {product.stocks
-                    .map((stock) => stock.size)
-                    .sort((a, b) => a - b)
+                    .map((stock) =>
+                      stock && typeof stock.size === "object"
+                        ? stock.size.name
+                        : stock.size,
+                    )
+                    .filter((sz) => sz !== undefined && sz !== null)
+                    .sort((a, b) => {
+                      // sizes may be strings, convert to numbers when possible
+                      const na = Number(a);
+                      const nb = Number(b);
+                      if (!isNaN(na) && !isNaN(nb)) return na - nb;
+                      return String(a).localeCompare(String(b));
+                    })
                     .map((size) => (
                       <button
                         key={size}
@@ -188,14 +247,32 @@ export default function ProductPage() {
                     ))}
                 </div>
               </div>
+            ) : (
+              <div className="mb-6">
+                <h3 className="font-semibold text-gray-900 mb-3">Sizes</h3>
+                <p className="text-gray-600">Not available at the moment.</p>
+              </div>
             )}
 
             <div className="space-y-3 mb-8">
+              <div className="flex items-center gap-3">
+                <label className="block text-sm">Quantity</label>
+                <input
+                  type="number"
+                  min="1"
+                  value={quantity}
+                  onChange={(e) =>
+                    setQuantity(Math.max(1, Number(e.target.value || 1)))
+                  }
+                  className="w-24 p-2 border"
+                />
+              </div>
+
               <button
                 onClick={handleAddToCart}
-                disabled={!product.inStock || addingToCart}
+                disabled={!product.inStock || addingToCart || !hasStock}
                 className={`w-full py-3 rounded font-semibold transition-all ${
-                  !product.inStock || addingToCart
+                  !product.inStock || addingToCart || !hasStock
                     ? "bg-gray-400 text-white cursor-not-allowed"
                     : "bg-gray-900 text-white hover:bg-gray-800"
                 }`}

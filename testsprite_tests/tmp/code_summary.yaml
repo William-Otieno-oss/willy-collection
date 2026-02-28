@@ -1,0 +1,120 @@
+version: "2"
+type: backend
+tech_stack:
+  - language: JavaScript
+  - framework: Express
+  - database: SQLite (development) / PostgreSQL (production via Prisma)
+  - other: Prisma ORM, JWT authentication, Multer uploads, AWS S3 client
+features:
+  - name: Authentication
+    description: JWT-based admin authentication and session management
+    files:
+      - backend/src/routes/auth.js
+      - backend/src/middleware/auth.js
+      - backend/src/server.js
+    endpoints:
+      - method: POST
+        path: /api/auth/login
+        description: Authenticate admin and return JWT token
+        auth_required: false
+        request_schema:
+          body:
+            email: string
+            password: string
+        response_schema:
+          "200": AuthTokenWithAdminProfile
+          "401": Invalid credentials
+  - name: Sneaker Catalog API
+    description: Read APIs for sneaker products, brands, banners, and categories
+    files:
+      - backend/src/routes/sneakers.js
+      - backend/src/routes/brands.js
+      - backend/src/routes/banners.js
+      - backend/src/routes/categories.js
+      - backend/src/server.js
+    endpoints:
+      - method: GET
+        path: /api/sneakers
+        description: List all sneakers with filters
+        auth_required: false
+        response_schema:
+          "200": Sneaker[]
+      - method: GET
+        path: /api/sneakers/:slug
+        description: Get sneaker details by slug
+        auth_required: false
+        response_schema:
+          "200": Sneaker
+          "404": Not found
+      - method: GET
+        path: /api/brands
+        description: List all brands
+        auth_required: false
+        response_schema:
+          "200": Brand[]
+      - method: GET
+        path: /api/categories
+        description: List all categories
+        auth_required: false
+        response_schema:
+          "200": Category[]
+      - method: GET
+        path: /api/banners
+        description: List all homepage banners
+        auth_required: false
+        response_schema:
+          "200": Banner[]
+  - name: Order Management
+    description: Create customer orders for sneakers from the storefront
+    files:
+      - backend/src/routes/orders.js
+      - backend/src/server.js
+    endpoints:
+      - method: POST
+        path: /api/orders
+        description: Create a new customer order
+        auth_required: false
+        request_schema:
+          body:
+            items: OrderItem[]
+            customerName: string
+            phone: string
+            address: string
+        response_schema:
+          "201": Order
+          "400": Validation error
+  - name: Admin Product Management
+    description: Admin APIs for managing sneakers, inventory, and uploads
+    files:
+      - backend/src/routes/admin.js
+      - backend/src/routes/s3.js
+      - backend/src/services/storage.js
+      - backend/src/utils/upload.js
+    endpoints:
+      - method: POST
+        path: /api/admin/sneakers
+        description: Create or update sneaker products
+        auth_required: true
+        request_schema:
+          body:
+            modelName: string
+            price: number
+            brandId: string
+        response_schema:
+          "200": Sneaker
+          "400": Validation error
+          "401": Unauthorized
+      - method: POST
+        path: /api/s3/presign
+        description: Generate pre-signed URL for image upload
+        auth_required: true
+        response_schema:
+          "200": PresignedUploadInfo
+known_limitations:
+  - issue: ALLOWED_ORIGINS must be updated for production domains
+    location: backend/src/server.js
+    impact: Frontend on new domains may fail CORS checks until configured
+  - issue: CSP headers are very strict and only allow same-origin scripts and styles
+    location: backend/src/server.js
+    impact: Third-party scripts or styles could be blocked in production
+

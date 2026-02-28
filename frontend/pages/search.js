@@ -8,25 +8,50 @@ import { API_BASE } from "../lib/api";
 import { LoadingSpinner, EmptyState } from "../components/Loading";
 import PageHeader from "../components/PageHeader";
 
-const fetcher = (url) =>
-  fetch(url)
-    .then((r) => r.json())
-    .catch((e) => {
-      // Error handled via state management
-      return { data: [] };
-    });
+const fetcher = async (url) => {
+  const res = await fetch(url);
+  const data = await res.json();
+  if (!res.ok || (data && data.success === false && data.error)) {
+    const err = new Error(
+      (data && data.error && data.error.message) || "Failed to fetch products",
+    );
+    err.status = res.status;
+    throw err;
+  }
+  return data;
+};
 
 export default function SearchPage() {
   const router = useRouter();
   const { q } = router.query;
   const searchQuery = (q || "").toLowerCase();
 
-  const { data, isLoading, error } = useSWR(
-    `${API_BASE}/api/sneakers?limit=500`,
-    fetcher,
-  );
+  // local input state for debouncing
+  const [inputValue, setInputValue] = useState(q || "");
 
-  const products = data?.data || [];
+  // debounce URL update
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      if (inputValue !== q) {
+        router.replace(
+          { pathname: "/search", query: { q: inputValue } },
+          undefined,
+          { shallow: true },
+        );
+      }
+    }, 300);
+    return () => clearTimeout(handler);
+  }, [inputValue, q, router]);
+
+  const { data, isLoading, error } = useSWR(() => {
+    let url = `${API_BASE}/api/sneakers?limit=500`;
+    if (searchQuery) {
+      url += `&search=${encodeURIComponent(searchQuery)}`;
+    }
+    return url;
+  }, fetcher);
+
+  const products = data?.data || data || [];
 
   function getBrandName(b) {
     if (!b) return "Unknown";
@@ -34,21 +59,8 @@ export default function SearchPage() {
     return b.name || b.brandName || "Unknown";
   }
 
-  // Filter products based on search query
-  const filteredProducts = searchQuery
-    ? products.filter((p) => {
-        const brandName = getBrandName(p.brand);
-        const searchableText = [
-          p.modelName,
-          p.description,
-          brandName,
-          p.category,
-        ]
-          .join(" ")
-          .toLowerCase();
-        return searchableText.includes(searchQuery);
-      })
-    : products;
+  // server has already filtered results based on searchQuery
+  const filteredProducts = products;
 
   // Sorting
   const [sortBy, setSortBy] = useState("recent");
@@ -82,6 +94,13 @@ export default function SearchPage() {
             <span className="text-sm text-gray-600">
               Showing {isLoading ? "..." : filteredProducts.length} products
             </span>
+            <input
+              type="text"
+              placeholder="Search products..."
+              value={inputValue}
+              onChange={(e) => setInputValue(e.target.value)}
+              className="flex-1 px-4 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-offset-0"
+            />
             <select
               value={sortBy}
               onChange={(e) => setSortBy(e.target.value)}
@@ -105,7 +124,21 @@ export default function SearchPage() {
             <EmptyState
               icon="❌"
               title="Something went wrong"
-              description="Unable to load products. Please try again."
+              description={(() => {
+                if (error.status === 400)
+                  return "Bad request. Please check your input.";
+                if (error.status === 401)
+                  return "Unauthorized access. Please log in.";
+                if (error.status === 403)
+                  return "You do not have permission to view this resource.";
+                if (error.status === 404)
+                  return "Requested resource not found.";
+                if (error.status === 429)
+                  return "Too many requests. Please try again later.";
+                return (
+                  error.message || "Unable to load products. Please try again."
+                );
+              })()}
             />
           ) : filteredProducts.length === 0 ? (
             <EmptyState

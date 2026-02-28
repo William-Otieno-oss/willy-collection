@@ -1,6 +1,11 @@
 import { useEffect, useState } from "react";
 import Layout from "../../components/Layout";
-import API_BASE from "../../lib/api";
+import {
+  API_BASE,
+  adminFetcher,
+  adminPostRequest,
+  adminDeleteRequest,
+} from "../../lib/api";
 import PageHeader from "../../components/PageHeader";
 import Button from "../../components/Button";
 import Card from "../../components/Card";
@@ -13,22 +18,24 @@ export default function Sizes() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    load();
+    const check = async () => {
+      try {
+        await load();
+      } catch (err) {
+        if (err.status === 401) window.location.href = "/admin/login";
+      }
+    };
+    check();
   }, []);
 
   async function load() {
     try {
       setLoading(true);
-      const token = localStorage.getItem("admin_token");
-      const res = await fetch(`${API_BASE}/api/admin/sizes`, {
-        headers: { Authorization: token ? `Bearer ${token}` : "" },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setSizes(data);
-      }
+      const data = await adminFetcher("/api/admin/sizes");
+      setSizes(data || []);
     } catch (err) {
       // Error handled via error state
+      if (err.status === 401) window.location.href = "/admin/login";
     } finally {
       setLoading(false);
     }
@@ -37,35 +44,21 @@ export default function Sizes() {
   async function create() {
     if (!name.trim()) return;
     try {
-      const token = localStorage.getItem("admin_token");
-      const res = await fetch(`${API_BASE}/api/admin/sizes`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: token ? `Bearer ${token}` : "",
-        },
-        body: JSON.stringify({ name }),
-      });
-      if (res.ok) {
-        setName("");
-        load();
-      }
+      await adminPostRequest("/api/admin/sizes", { name });
+      setName("");
+      load();
     } catch (err) {
-      // Error handled via error state
+      if (err.status === 401) window.location.href = "/admin/login";
     }
   }
 
   async function remove(id) {
     if (!confirm("Delete this size?")) return;
     try {
-      const token = localStorage.getItem("admin_token");
-      const res = await fetch(`${API_BASE}/api/admin/sizes/${id}`, {
-        method: "DELETE",
-        headers: { Authorization: token ? `Bearer ${token}` : "" },
-      });
-      if (res.ok) load();
+      await adminDeleteRequest(`/api/admin/sizes/${id}`);
+      load();
     } catch (err) {
-      // Error handled via error state
+      if (err.status === 401) window.location.href = "/admin/login";
     }
   }
 

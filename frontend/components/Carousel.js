@@ -49,15 +49,15 @@ const Carousel = ({ children }) => {
 
   if (!isLoaded) {
     return (
-      <div className="h-96 md:h-screen bg-gradient-to-b from-gray-900 to-black flex items-center justify-center">
-        <div className="animate-pulse text-white">Loading...</div>
+      <div className="h-96 md:h-screen bg-gradient-to-b from-neutral-100 to-neutral-200 flex items-center justify-center">
+        <div className="animate-pulse text-neutral-600">Loading...</div>
       </div>
     );
   }
 
   return (
     <div
-      className="relative h-96 md:h-screen bg-gray-900 overflow-hidden group"
+      className="relative h-96 md:h-screen bg-neutral-100 overflow-hidden group"
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
     >

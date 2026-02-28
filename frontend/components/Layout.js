@@ -3,10 +3,10 @@ import Link from "next/link";
 
 export default function Layout({ children }) {
   return (
-    <div className="min-h-screen flex flex-col bg-white">
+    <div className="min-h-screen flex flex-col bg-white text-neutral-900">
       <Header />
       <main className="flex-1">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
           {children}
         </div>
       </main>
@@ -123,17 +123,17 @@ function Footer() {
               {[
                 {
                   name: "Facebook",
-                  href: "https://facebook.com/willycollection",
+                  href: "https://facebook.com/willycollection.ke",
                   icon: "f",
                 },
                 {
                   name: "Instagram",
-                  href: "https://instagram.com/willycollection",
+                  href: "https://instagram.com/willycollection.ke",
                   icon: "📷",
                 },
                 {
                   name: "TikTok",
-                  href: "https://tiktok.com/@willycollection",
+                  href: "https://tiktok.com/@willycollection.ke",
                   icon: "🎵",
                 },
                 {
@@ -190,15 +190,20 @@ function Footer() {
       {/* Copyright */}
       <div className="border-t border-gray-800 px-4 sm:px-6 lg:px-8 py-8 bg-black/50">
         <div className="max-w-7xl mx-auto text-center">
-          <p className="text-sm text-gray-400">
-            <span className="font-semibold text-gray-300">
-              willy COLLECTION
-            </span>{" "}
-            👟 – Premium sneakers & footwear delivery across Kenya
-          </p>
+          <div className="flex flex-col items-center text-center">
+            <p className="text-sm text-gray-400">
+              <span className="font-semibold text-gray-300">
+                willy COLLECTION
+              </span>{" "}
+              👟 – Premium sneakers & footwear delivery across Kenya
+            </p>
+          </div>
           <p className="text-xs text-gray-500 mt-2">
             © 2026 All rights reserved. | Crafted with ❤️ for sneaker
             enthusiasts
+          </p>
+          <p className="text-xs text-gray-500 mt-2">
+            Developed by William Otieno Dancun
           </p>
         </div>
       </div>

@@ -1,0 +1,40 @@
+{
+  "buildCommand": "npm run build",
+  "outputDirectory": ".next",
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "${NEXT_PUBLIC_API_URL}/api/:path*"
+    }
+  ],
+  "env": {
+    "NEXT_PUBLIC_API_URL": "@next_public_api_url"
+  },
+  "headers": [
+    {
+      "source": "/:path*",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=3600, s-maxage=3600"
+        },
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "X-Frame-Options",
+          "value": "SAMEORIGIN"
+        },
+        {
+          "key": "X-XSS-Protection",
+          "value": "1; mode=block"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "strict-origin-when-cross-origin"
+        }
+      ]
+    }
+  ]
+}

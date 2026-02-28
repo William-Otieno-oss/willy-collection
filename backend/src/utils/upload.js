@@ -16,7 +16,7 @@ function parseIntEnv(name, fallback) {
   return isNaN(n) ? fallback : n;
 }
 
-const MAX_UPLOAD_SIZE = parseIntEnv("MAX_UPLOAD_SIZE", 5 * 1024 * 1024); // 5MB default
+const MAX_UPLOAD_SIZE = parseIntEnv("MAX_UPLOAD_SIZE", 10 * 1024 * 1024); // 10MB default (must match update route check)
 const MAX_FILES = parseIntEnv("MAX_FILES", 16); // 16 files default
 
 const diskStorage = multer.diskStorage({

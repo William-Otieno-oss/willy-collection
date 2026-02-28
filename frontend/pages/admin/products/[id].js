@@ -1,6 +1,14 @@
 import { useEffect, useState } from "react";
 import Layout from "../../../components/Layout";
-import API_BASE from "../../../lib/api";
+import {
+  API_BASE,
+  getImageUrl,
+  adminFetcher,
+  adminPostRequest,
+  adminPutRequest,
+  adminDeleteRequest,
+  APIError,
+} from "../../../lib/api";
 import { useRouter } from "next/router";
 
 export default function EditProduct() {
@@ -10,7 +18,13 @@ export default function EditProduct() {
   const [s, setS] = useState(null);
   const [sizes, setSizes] = useState([]);
   const [stocks, setStocks] = useState([]);
-  const [newStock, setNewStock] = useState({ sizeId: "", quantity: 0 });
+  const [newStock, setNewStock] = useState({
+    sizeId: "",
+    quantity: 0,
+    rangeStart: "",
+    rangeEnd: "",
+    rangeQty: 0,
+  });
   const [newImages, setNewImages] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [draggingId, setDraggingId] = useState(null);
@@ -19,45 +33,38 @@ export default function EditProduct() {
   const [notFound, setNotFound] = useState(false);
 
   useEffect(() => {
-    // Check authentication on mount
-    const token = localStorage.getItem("admin_token");
-    const expiresAt = localStorage.getItem("admin_token_expires");
-
-    if (!token || !expiresAt || parseInt(expiresAt) <= Date.now()) {
-      localStorage.removeItem("admin_token");
-      localStorage.removeItem("admin_token_expires");
-      router.push("/admin/login");
-      return;
-    }
-
-    setAuthenticated(true);
-    if (id) load();
+    const checkAuth = async () => {
+      try {
+        await adminFetcher("/api/sneakers?limit=1");
+        setAuthenticated(true);
+        if (id) load();
+      } catch (err) {
+        if (err.status === 401) {
+          router.push("/admin/login");
+        }
+      }
+    };
+    checkAuth();
   }, [id, router]);
 
   async function load() {
     try {
-      const res = await fetch(`${API_BASE}/api/sneakers`);
-      const list = await res.json();
-      const item = list.find((x) => x.id === parseInt(id));
-
+      const item = await adminFetcher(`/api/sneakers/${id}`);
       if (!item) {
         setNotFound(true);
         setS(null);
         return;
       }
-
       setS(item);
       setNotFound(false);
 
-      const r2 = await fetch(`${API_BASE}/api/admin/sizes`);
-      const sizesData = await r2.json();
+      const sizesData = await adminFetcher("/api/admin/sizes");
       setSizes(Array.isArray(sizesData) ? sizesData : []);
 
-      const r3 = await fetch(`${API_BASE}/api/sneakers/${item.slug}`);
-      const full = await r3.json();
-      setStocks(full.stocks || []);
+      // stocks may be part of item response; if not, fetch separately
+      const stocksList = item.stocks || [];
+      setStocks(stocksList);
     } catch (err) {
-      // Error handled via error state
       setSizes([]);
       setStocks([]);
       setNotFound(true);
@@ -70,20 +77,50 @@ export default function EditProduct() {
   }
 
   async function saveStock() {
-    const body = {
-      stocks: [{ sizeId: newStock.sizeId, quantity: newStock.quantity }],
-    };
-    const res = await fetch(`${API_BASE}/api/admin/sneakers/${id}/stocks`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(body),
-    });
-    if (res.ok) {
-      const updated = await res.json();
+    // decide whether to add a single size or a range
+    let toAdd = [];
+    const qty = parseInt(newStock.quantity, 10);
+    if (newStock.rangeStart && newStock.rangeEnd) {
+      const start = parseInt(newStock.rangeStart, 10);
+      const end = parseInt(newStock.rangeEnd, 10);
+      const rqty = parseInt(newStock.rangeQty, 10);
+      if (!start || !end || isNaN(rqty) || rqty < 0 || start > end) {
+        return;
+      }
+      // build ordered list from sizes
+      const ordered = [...sizes]
+        .map((sz) => ({ id: sz.id, num: parseFloat(sz.name) || NaN }))
+        .filter((z) => !isNaN(z.num))
+        .sort((a, b) => a.num - b.num);
+      const startIdx = ordered.findIndex((z) => z.id === start);
+      const endIdx = ordered.findIndex((z) => z.id === end);
+      if (startIdx < 0 || endIdx < 0) return;
+      const rangeIds = ordered.slice(startIdx, endIdx + 1).map((z) => z.id);
+      toAdd = rangeIds.map((sid) => ({ sizeId: sid, quantity: rqty }));
+    } else if (newStock.sizeId) {
+      const sid = parseInt(newStock.sizeId, 10);
+      if (!sid || isNaN(qty) || qty < 0) return;
+      toAdd = [{ sizeId: sid, quantity: qty }];
+    }
+
+    if (toAdd.length === 0) return;
+
+    const body = { stocks: toAdd };
+    try {
+      const updated = await adminPostRequest(
+        `/api/admin/sneakers/${id}/stocks`,
+        body,
+      );
       setStocks((s) => [...s, ...updated]);
-      setNewStock({ sizeId: "", quantity: 0 });
+      setNewStock({
+        sizeId: "",
+        quantity: 0,
+        rangeStart: "",
+        rangeEnd: "",
+        rangeQty: 0,
+      });
+    } catch (err) {
+      console.error("Failed to save stock", err);
     }
   }
 
@@ -102,49 +139,49 @@ export default function EditProduct() {
     setUploadProgress(0);
     setPerFileProgress({});
     const files = Array.from(newImages);
-    const formData = new FormData();
-    files.forEach((f) => formData.append("images", f));
 
+    // use XMLHttpRequest so we can get per-file progress as well
     try {
-      // Get auth token from localStorage (login saves it as 'admin_token')
-      const token =
-        typeof window !== "undefined"
-          ? localStorage.getItem("admin_token")
-          : null;
+      for (let i = 0; i < files.length; i++) {
+        const f = files[i];
+        const formData = new FormData();
+        formData.append("images", f);
 
-      if (!token) {
-        alert("Not logged in. Please login first.");
-        setUploading(false);
-        return;
+        await new Promise((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          xhr.open("PUT", `${API_BASE}/api/sneakers/${id}`);
+          // ensure cookies are included in cross-origin requests (different port)
+          xhr.withCredentials = true;
+          // cookies are also generally sent automatically for same-site
+          xhr.upload.onprogress = (ev) => {
+            if (ev.lengthComputable) {
+              const pct = Math.round((ev.loaded / ev.total) * 100);
+              setPerFileProgress((p) => ({ ...p, [i]: pct }));
+            }
+          };
+          xhr.onload = async () => {
+            if (xhr.status >= 200 && xhr.status < 300) {
+              resolve();
+            } else {
+              reject(new Error(`HTTP ${xhr.status}: ${xhr.responseText}`));
+            }
+          };
+          xhr.onerror = () => reject(new Error("Network error"));
+          xhr.send(formData);
+        });
       }
 
-      const res = await fetch(`${API_BASE}/api/sneakers/${id}`, {
-        method: "PUT",
-        body: formData,
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-        credentials: "include",
-      });
-
-      if (res.ok) {
-        setUploading(false);
-        setUploadProgress(0);
-        setPerFileProgress({});
-        // refresh data
-        const r = await fetch(`${API_BASE}/api/sneakers/${s.slug}`);
-        const full = await r.json();
-        setS(full);
-        setNewImages(null);
-        alert("Images uploaded successfully");
-      } else {
-        alert("Upload failed: " + (await res.text()));
-        setUploading(false);
-      }
+      // all files uploaded, refresh state
+      const full = await adminFetcher(`/api/sneakers/${s.slug}`);
+      setS(full);
+      setNewImages(null);
+      alert("Images uploaded successfully");
     } catch (err) {
       console.error("Upload error:", err);
       alert("Upload error: " + err.message);
+    } finally {
       setUploading(false);
+      setPerFileProgress({});
     }
   }
 
@@ -191,25 +228,25 @@ export default function EditProduct() {
     form.append("colors", JSON.stringify(s.colors || []));
     form.append("featured", s.featured ? "true" : "false");
     form.append("inStock", s.inStock ? "true" : "false");
-    const res = await fetch(`${API_BASE}/api/sneakers/${id}`, {
-      method: "PUT",
-      body: form,
-    });
-    if (res.ok) alert("Product updated");
-    else alert("Update failed");
+    try {
+      await adminPutRequest(`/api/sneakers/${id}`, form);
+      alert("Product updated");
+    } catch (err) {
+      alert("Update failed");
+    }
   }
 
   async function deleteImage(imgId) {
     if (!confirm("Delete image?")) return;
-    const res = await fetch(`${API_BASE}/api/sneakers/images/${imgId}`, {
-      method: "DELETE",
-    });
-    if (res.ok) {
+    try {
+      await adminDeleteRequest(`/api/sneakers/images/${imgId}`);
       setS((prev) => ({
         ...prev,
         images: prev.images.filter((i) => i.id !== imgId),
       }));
-    } else alert("Failed to delete");
+    } catch {
+      alert("Failed to delete");
+    }
   }
 
   function onDragStart(e, imgId) {
@@ -234,13 +271,13 @@ export default function EditProduct() {
     setS((p) => ({ ...p, images: imgs }));
     setDraggingId(null);
     // persist order
-    await fetch(`${API_BASE}/api/sneakers/${id}/images/order`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ order: imgs.map((i) => i.id) }),
-    });
+    try {
+      await adminPostRequest(`/api/sneakers/${id}/images/order`, {
+        order: imgs.map((i) => i.id),
+      });
+    } catch (err) {
+      console.error("Failed to persist image order", err);
+    }
   }
 
   return (
@@ -334,7 +371,13 @@ export default function EditProduct() {
                 onDrop={(e) => onDrop(e, img.id)}
               >
                 <div className="cursor-move p-1">☰</div>
-                <img src={img.url} className="w-32 h-24 object-cover" />
+                <img
+                  src={getImageUrl(img.url)}
+                  onError={(e) => {
+                    e.target.src = "/placeholder.png";
+                  }}
+                  className="w-32 h-24 object-cover"
+                />
                 <div>
                   <button
                     onClick={() => deleteImage(img.id)}
@@ -358,14 +401,22 @@ export default function EditProduct() {
                 <div className="text-sm">Selected:</div>
                 <ul className="list-disc ml-6 text-sm">
                   {newImages.map((f, idx) => (
-                    <li key={idx}>
+                    <li key={idx} className="mb-1">
                       {f.name} ({Math.round(f.size / 1024)} KB)
+                      {uploading && (
+                        <div className="w-full bg-gray-200 h-1 rounded mt-1">
+                          <div
+                            className="bg-green-500 h-1 rounded transition-all"
+                            style={{ width: `${perFileProgress[idx] || 0}%` }}
+                          />
+                        </div>
+                      )}
                     </li>
                   ))}
                 </ul>
               </div>
             )}
-            {uploading && (
+            {uploading && !newImages && (
               <div className="mt-2 p-3 bg-blue-50 border border-blue-200 rounded">
                 <div className="text-sm font-semibold text-blue-900">
                   Uploading images...
@@ -409,7 +460,7 @@ export default function EditProduct() {
               }
               className="p-2 border mr-2"
             >
-              <option value="">Select size</option>
+              <option value="">Size</option>
               {sizes.map((sz) => (
                 <option key={sz.id} value={sz.id}>
                   {sz.name}
@@ -426,6 +477,47 @@ export default function EditProduct() {
                 }))
               }
               className="p-2 border mr-2"
+            />
+            {/* range inputs */}
+            <select
+              value={newStock.rangeStart || ""}
+              onChange={(e) =>
+                setNewStock((n) => ({ ...n, rangeStart: e.target.value }))
+              }
+              className="p-2 border mr-2"
+            >
+              <option value="">From</option>
+              {sizes.map((sz) => (
+                <option key={sz.id} value={sz.id}>
+                  {sz.name}
+                </option>
+              ))}
+            </select>
+            <select
+              value={newStock.rangeEnd || ""}
+              onChange={(e) =>
+                setNewStock((n) => ({ ...n, rangeEnd: e.target.value }))
+              }
+              className="p-2 border mr-2"
+            >
+              <option value="">To</option>
+              {sizes.map((sz) => (
+                <option key={sz.id} value={sz.id}>
+                  {sz.name}
+                </option>
+              ))}
+            </select>
+            <input
+              type="number"
+              placeholder="Qty each"
+              value={newStock.rangeQty}
+              onChange={(e) =>
+                setNewStock((n) => ({
+                  ...n,
+                  rangeQty: parseInt(e.target.value),
+                }))
+              }
+              className="p-2 border mr-2 w-20"
             />
             <button
               onClick={saveStock}

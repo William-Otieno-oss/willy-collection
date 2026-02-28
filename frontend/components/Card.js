@@ -8,10 +8,10 @@ export default function Card({
   return (
     <div
       className={`
-        bg-white rounded-2xl 
-        ${noBorder ? "" : "border border-gray-100"}
-        ${elevated ? "shadow-xl" : "shadow-md"}
-        ${hoverable ? "hover:shadow-2xl hover:border-accent/30 hover:-translate-y-1 transition-all duration-300" : ""}
+        bg-white rounded-lg p-8
+        ${noBorder ? "" : "border border-neutral-200/60"}
+        ${elevated ? "shadow-sm" : "shadow-xs"}
+        ${hoverable ? "hover:shadow-sm hover:border-brand/30 transition-all duration-200 cursor-pointer" : ""}
         ${className}
       `}
     >

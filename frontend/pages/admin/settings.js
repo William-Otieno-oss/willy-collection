@@ -1,6 +1,12 @@
 import { useEffect, useState } from "react";
+import { useRouter } from "next/router";
 import Layout from "../../components/Layout";
-import API_BASE from "../../lib/api";
+import API_BASE, {
+  adminFetcher,
+  adminPostRequest,
+  adminDeleteRequest,
+  APIError,
+} from "../../lib/api";
 import PageHeader from "../../components/PageHeader";
 import Button from "../../components/Button";
 import Card from "../../components/Card";
@@ -9,10 +15,13 @@ import Badge from "../../components/Badge";
 import { LoadingSpinner } from "../../components/Loading";
 
 export default function Settings() {
+  const router = useRouter();
   const [settings, setSettings] = useState({});
   const [key, setKey] = useState("");
   const [value, setValue] = useState("");
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
 
   useEffect(() => {
     load();
@@ -21,40 +30,94 @@ export default function Settings() {
   async function load() {
     try {
       setLoading(true);
-      const token = localStorage.getItem("admin_token");
-      const res = await fetch(`${API_BASE}/api/admin/site-settings`, {
-        headers: { Authorization: token ? `Bearer ${token}` : "" },
-      });
-      const data = await res.json();
-      setSettings(data);
+      setError("");
+      const data = await adminFetcher("/api/admin/site-settings");
+      setSettings(data || {});
     } catch (err) {
-      // Error handled via error state
+      if (err instanceof APIError && err.status === 401) {
+        router.push("/admin/login");
+      } else {
+        setError("Failed to load settings");
+      }
     } finally {
       setLoading(false);
     }
   }
 
   async function save() {
+    setError("");
+    setSuccess("");
+
+    if (!key.trim()) {
+      setError("Key is required");
+      return;
+    }
+
+    if (!value.trim()) {
+      setError("Value is required");
+      return;
+    }
+
     try {
-      const token = localStorage.getItem("admin_token");
-      const res = await fetch(`${API_BASE}/api/admin/site-settings`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: token ? `Bearer ${token}` : "",
-        },
-        body: JSON.stringify({
-          key,
-          value: JSON.parse(value || '""'),
-        }),
-      });
-      if (res.ok) {
-        load();
-        setKey("");
-        setValue("");
+      // Try to parse as JSON, if it fails treat as plain string
+      let parsedValue;
+      try {
+        parsedValue = JSON.parse(value);
+      } catch {
+        // If JSON parsing fails, treat as plain string
+        parsedValue = value.trim();
       }
+
+      await adminPostRequest("/api/admin/site-settings", {
+        key,
+        value: parsedValue,
+      });
+      setSuccess("Setting saved successfully!");
+      await load();
+      setKey("");
+      setValue("");
+      setTimeout(() => setSuccess(""), 3000);
     } catch (err) {
-      // Error handled via error state
+      if (err instanceof APIError && err.status === 401) {
+        router.push("/admin/login");
+      } else if (err instanceof APIError) {
+        setError(err.message || "Failed to save setting");
+      } else {
+        setError("Failed to save setting. Invalid JSON value?");
+      }
+    }
+  }
+
+  function edit(settingKey, settingValue) {
+    setKey(settingKey);
+    setValue(typeof settingValue === "string" ? settingValue : JSON.stringify(settingValue, null, 2));
+    setError("");
+    setSuccess("");
+  }
+
+  async function deleteSetting(settingKey) {
+    if (!confirm(`Are you sure you want to delete the setting "${settingKey}"?`)) {
+      return;
+    }
+
+    setError("");
+    setSuccess("");
+
+    try {
+      await adminDeleteRequest(`/api/admin/site-settings/${encodeURIComponent(settingKey)}`);
+      setSuccess("Setting deleted successfully!");
+      await load();
+      setKey("");
+      setValue("");
+      setTimeout(() => setSuccess(""), 3000);
+    } catch (err) {
+      if (err instanceof APIError && err.status === 401) {
+        router.push("/admin/login");
+      } else if (err instanceof APIError) {
+        setError(err.message || "Failed to delete setting");
+      } else {
+        setError("Failed to delete setting");
+      }
     }
   }
 
@@ -71,6 +134,19 @@ export default function Settings() {
             <h2 className="text-lg font-semibold text-gray-900 mb-4">
               Add Setting
             </h2>
+
+            {error && (
+              <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
+                {error}
+              </div>
+            )}
+
+            {success && (
+              <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg text-green-700 text-sm">
+                {success}
+              </div>
+            )}
+
             <FormInput
               label="Key"
               placeholder="e.g., storeName"
@@ -78,8 +154,8 @@ export default function Settings() {
               onChange={(e) => setKey(e.target.value)}
             />
             <FormTextarea
-              label="Value (JSON)"
-              placeholder='e.g., "willy COLLECTION" or {"text":"hello"}'
+              label="Value"
+              placeholder='e.g., "willy COLLECTION" or {"open":"9AM","close":"5PM"} or just plain text'
               value={value}
               onChange={(e) => setValue(e.target.value)}
               rows="4"
@@ -118,7 +194,20 @@ export default function Settings() {
                           <span className="font-mono font-semibold text-gray-900">
                             {k}
                           </span>
-                          <Badge variant="default">String</Badge>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => edit(k, v)}
+                              className="px-3 py-1 text-sm bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              onClick={() => deleteSetting(k)}
+                              className="px-3 py-1 text-sm bg-red-500 text-white rounded hover:bg-red-600 transition-colors"
+                            >
+                              Delete
+                            </button>
+                          </div>
                         </div>
                         <pre className="text-sm text-gray-700 bg-white p-2 rounded border border-gray-200 overflow-auto max-h-32">
                           {JSON.stringify(v, null, 2)}

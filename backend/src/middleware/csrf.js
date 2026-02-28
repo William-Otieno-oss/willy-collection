@@ -78,8 +78,8 @@ const csrfProtection = (req, res, next) => {
     return next();
   }
 
-  // Skip CSRF check if Authorization header present (JWT authenticated)
-  if (req.headers.authorization) {
+  // Skip CSRF check if Authorization header present or access_token cookie (JWT authenticated)
+  if (req.headers.authorization || (req.cookies && req.cookies.access_token)) {
     return next();
   }
 

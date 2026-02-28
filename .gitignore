@@ -1,6 +1,7 @@
 # Environment
 .env
 .env.local
+.env.production
 .env.*.local
 .env.production.local
 
@@ -71,3 +72,5 @@ minio-data/
 .cache/
 .turbo/
 .qodo/
+# ignore backup files
+*.bak

@@ -11,6 +11,7 @@ export default function Header() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [mobileMenuVisible, setMobileMenuVisible] = useState(false);
   const [cartCount, setCartCount] = useState(0);
+  const [wishlistCount, setWishlistCount] = useState(0);
   const [scrolled, setScrolled] = useState(false);
   const [searchInput, setSearchInput] = useState("");
   const [mounted, setMounted] = useState(false);
@@ -40,6 +41,8 @@ export default function Header() {
     try {
       const cart = JSON.parse(localStorage.getItem("cart") || "[]");
       setCartCount(cart.length);
+      const wishlist = JSON.parse(localStorage.getItem("wishlist") || "[]");
+      setWishlistCount(wishlist.length);
     } catch (e) {
       setCartCount(0);
     }
@@ -54,12 +57,27 @@ export default function Header() {
       }
     };
 
+    const handleWishlistUpdate = () => {
+      try {
+        const wishlist = JSON.parse(localStorage.getItem("wishlist") || "[]");
+        setWishlistCount(wishlist.length);
+      } catch (e) {
+        setWishlistCount(0);
+      }
+    };
+
     window.addEventListener("cartUpdated", handleCartUpdate);
-    window.addEventListener("storage", handleCartUpdate);
+    window.addEventListener("wishlistUpdated", handleWishlistUpdate);
+    const handleStorage = () => {
+      handleCartUpdate();
+      handleWishlistUpdate();
+    };
+    window.addEventListener("storage", handleStorage);
 
     return () => {
       window.removeEventListener("cartUpdated", handleCartUpdate);
-      window.removeEventListener("storage", handleCartUpdate);
+      window.removeEventListener("wishlistUpdated", handleWishlistUpdate);
+      window.removeEventListener("storage", handleStorage);
     };
   }, []);
 
@@ -80,10 +98,10 @@ export default function Header() {
 
   return (
     <header
-      className={`sticky top-0 z-50 animate-headerEnter transition-all duration-300 ${
+      className={`sticky top-0 z-50 animate-headerEnter transition-all duration-200 ${
         scrolled
-          ? "bg-white/95 backdrop-blur-md shadow-lg border-b border-gray-100"
-          : "bg-white border-b border-gray-50 shadow-sm"
+          ? "bg-white/95 backdrop-blur-md shadow-sm border-b border-neutral-200/60"
+          : "bg-white border-b border-neutral-100/70 shadow-xs"
       }`}
       role="banner"
     >
@@ -95,13 +113,13 @@ export default function Header() {
             className="flex items-center gap-2 flex-shrink-0 focus:outline-none animate-slideUpSoft"
             aria-label="Back to home"
           >
-            <div className="w-10 h-10 md:w-12 md:h-12 flex-shrink-0 animate-scaleUpSoft relative">
+            <div className="w-14 h-14 md:w-16 md:h-16 flex-shrink-0 animate-scaleUpSoft relative">
               <Image
                 src="/logo/willy collection.png"
                 alt="willy COLLECTION logo"
                 fill
                 className="object-contain"
-                sizes="(max-width: 768px) 40px, 48px"
+                sizes="(max-width: 768px) 56px, 64px"
               />
             </div>
             <span className="font-bold text-xs sm:text-sm md:text-base whitespace-nowrap animate-scaleUpSoft">
@@ -112,7 +130,7 @@ export default function Header() {
           {/* Center: Search */}
           <div className="flex-1 flex justify-center px-1 md:px-0">
             <form
-              className="w-full max-w-[350px] md:max-w-[450px] flex"
+              className="w-full max-w-[350px] md:max-w-[450px] flex gap-2"
               onSubmit={handleSearch}
             >
               <label htmlFor="site-search" className="sr-only">
@@ -123,11 +141,11 @@ export default function Header() {
                 placeholder="Search"
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
-                className="flex-1 min-w-0 h-10 md:h-11 px-3 md:px-4 text-sm md:text-base border border-gray-200 rounded-l-lg focus:outline-none search-focus-smooth transition-shadow duration-200"
+                className="flex-1 min-w-0 h-11 md:h-12 px-4 md:px-4 text-sm md:text-base border border-neutral-300 rounded-sm focus:outline-none focus:ring-2 focus:ring-brand/50 focus:border-transparent focus:ring-offset-0 transition-all duration-200"
               />
               <button
                 type="submit"
-                className="h-10 md:h-11 px-3 md:px-5 text-sm md:text-base border border-l-0 rounded-r-lg transition-transform duration-150 hover:translate-y-[-1px] focus:translate-y-[-1px]"
+                className="h-11 md:h-12 px-4 md:px-5 text-sm md:text-base bg-brand/10 hover:bg-brand/20 border border-brand/30 rounded-sm font-medium text-brand transition-all duration-200 hover:translate-y-[-1px] focus:translate-y-[-1px]"
               >
                 Search
               </button>
@@ -139,27 +157,51 @@ export default function Header() {
             {/* Cart Icon */}
             <Link
               href="/cart"
-              className="p-3 md:p-2.5 rounded-lg md:rounded-md micro-hover micro-press group"
+              className="p-2 md:p-2.5 rounded-sm micro-hover micro-press group relative text-xl md:text-2xl"
               aria-label={
                 mounted
                   ? `Shopping cart with ${cartCount} items`
                   : "Shopping cart"
               }
             >
-              <svg
-                className="w-5 h-5 md:w-6 md:h-6"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-                aria-hidden="true"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5"
-                />
-              </svg>
+              🛍️
+              {cartCount > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 bg-accent text-white text-[10px] font-bold leading-none px-1.5 py-0.5 rounded-full">
+                  {cartCount}
+                </span>
+              )}
+            </Link>
+
+
+            {/* Wishlist Icon */}
+            <Link
+              href="/wishlist"
+              className="p-3 md:p-2.5 rounded-sm micro-hover micro-press group"
+              aria-label={
+                mounted ? `Wishlist with ${wishlistCount} items` : "Wishlist"
+              }
+            >
+              <div className="relative">
+                <svg
+                  className="w-5 h-5 md:w-6 md:h-6 text-error"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                  aria-hidden="true"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"
+                  />
+                </svg>
+                {wishlistCount > 0 && (
+                  <span className="absolute -top-1 -right-1 bg-error text-white text-[10px] leading-none px-1 rounded-full">
+                    {wishlistCount}
+                  </span>
+                )}
+              </div>
             </Link>
 
             {/* Contact Icon + Phone */}
@@ -190,7 +232,7 @@ export default function Header() {
             {/* Mobile Menu Toggle */}
             <button
               onClick={toggleMobileMenu}
-              className="p-3 md:hidden rounded-md micro-hover"
+              className="p-3 md:hidden rounded-sm micro-hover"
               aria-label={mobileMenuOpen ? "Close menu" : "Open menu"}
               aria-expanded={mobileMenuOpen}
               aria-controls="mobile-menu"
@@ -225,7 +267,7 @@ export default function Header() {
         {/* Mobile Navigation Menu */}
         {mobileMenuVisible && (
           <nav
-            className={`lg:hidden border-t border-gray-100 py-4 bg-white ${mobileMenuOpen ? "animate-menuOpen" : "animate-menuClose"}`}
+            className={`lg:hidden border-t border-neutral-200 py-4 bg-white ${mobileMenuOpen ? "animate-menuOpen" : "animate-menuClose"}`}
             id="mobile-menu"
             aria-label="Mobile navigation"
           >
@@ -233,8 +275,7 @@ export default function Header() {
               <a
                 href="tel:+254797062606"
                 onClick={() => toggleMobileMenu()}
-                className="flex items-center gap-3 px-4 py-3 text-sm font-medium transition-colors rounded-lg hover:bg-gray-50 focus:outline-none focus:bg-gray-100 micro-hover"
-                style={{ color: "#1c140c" }}
+                className="flex items-center gap-3 px-4 py-3.5 text-sm font-medium transition-colors rounded-sm hover:bg-neutral-100 focus:outline-none focus:bg-neutral-100 micro-hover text-neutral-900"
               >
                 <svg
                   className="w-5 h-5 flex-shrink-0"
@@ -254,32 +295,28 @@ export default function Header() {
               <Link
                 href="/about"
                 onClick={() => toggleMobileMenu()}
-                className="block px-4 py-3 text-sm font-medium transition-colors rounded-lg hover:bg-gray-50 focus:outline-none focus:bg-gray-100 micro-hover"
-                style={{ color: "#1c140c" }}
+                className="block px-4 py-3.5 text-sm font-medium transition-colors rounded-sm hover:bg-neutral-100 focus:outline-none focus:bg-neutral-100 micro-hover text-neutral-900"
               >
                 About Us
               </Link>
               <Link
                 href="/shipping"
                 onClick={() => toggleMobileMenu()}
-                className="block px-4 py-3 text-sm font-medium transition-colors rounded-lg hover:bg-gray-50 focus:outline-none focus:bg-gray-100 micro-hover"
-                style={{ color: "#1c140c" }}
+                className="block px-4 py-3.5 text-sm font-medium transition-colors rounded-sm hover:bg-neutral-100 focus:outline-none focus:bg-neutral-100 micro-hover text-neutral-900"
               >
                 Shipping Policy
               </Link>
               <Link
                 href="/contact"
                 onClick={() => toggleMobileMenu()}
-                className="block px-4 py-3 text-sm font-medium transition-colors rounded-lg hover:bg-gray-50 focus:outline-none focus:bg-gray-100 micro-hover"
-                style={{ color: "#1c140c" }}
+                className="block px-4 py-3.5 text-sm font-medium transition-colors rounded-sm hover:bg-neutral-100 focus:outline-none focus:bg-neutral-100 micro-hover text-neutral-900"
               >
                 Contact Us
               </Link>
               <Link
                 href="/faqs"
                 onClick={() => toggleMobileMenu()}
-                className="block px-4 py-3 text-sm font-medium transition-colors rounded-lg hover:bg-gray-50 focus:outline-none focus:bg-gray-100 micro-hover"
-                style={{ color: "#1c140c" }}
+                className="block px-4 py-3.5 text-sm font-medium transition-colors rounded-sm hover:bg-neutral-100 focus:outline-none focus:bg-neutral-100 micro-hover text-neutral-900"
               >
                 FAQs
               </Link>

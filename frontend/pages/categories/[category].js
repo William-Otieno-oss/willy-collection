@@ -25,13 +25,17 @@ export default function CategoryPage() {
   const { category } = router.query;
   const categoryInfo = categoryMap[category] || { name: "Products", query: "" };
 
-  const { data } = useSWR(`${API_BASE}/api/sneakers`, fetcher);
+  // fetch products from the server with a category filter so we don’t rely on
+  // the client-side substring logic, which can accidentally drop items when
+  // case/spacing is off or the JSON format varies.
+  const queryParam = categoryInfo.query
+    ? `?category=${encodeURIComponent(categoryInfo.query)}`
+    : "";
+  const { data } = useSWR(`${API_BASE}/api/sneakers${queryParam}`, fetcher);
   const products = Array.isArray(data)
     ? data
-    : data?.data
-      ? Array.isArray(data.data)
-        ? data.data
-        : []
+    : data && Array.isArray(data.data)
+      ? data.data
       : [];
 
   function getBrandName(b) {
@@ -39,20 +43,8 @@ export default function CategoryPage() {
     return typeof b === "object" ? b.name : b;
   }
 
-  // Filter products based on category - this is a basic filter
-  // In a real app, you'd want category tags in your database
-  const filteredProducts = categoryInfo.query
-    ? products.filter((p) => {
-        const brandName = getBrandName(p.brand);
-        return (
-          brandName?.toLowerCase().includes(categoryInfo.query.toLowerCase()) ||
-          p.modelName
-            ?.toLowerCase()
-            .includes(categoryInfo.query.toLowerCase()) ||
-          p.category?.toLowerCase().includes(categoryInfo.query.toLowerCase())
-        );
-      })
-    : products;
+  // server already applied the category filter; no need to reevaluate here
+  const filteredProducts = products;
 
   // Sorting and filtering state could be added here
   const [sortBy, setSortBy] = useState("recent");
@@ -76,7 +68,7 @@ export default function CategoryPage() {
       {/* Category Header */}
       <div className="bg-gray-50 py-12 px-4 border-b border-gray-200">
         <div className="max-w-7xl mx-auto">
-          <h1 className="text-4xl font-bold mb-4" style={{ color: "#1c140c" }}>
+          <h1 className="text-4xl font-bold mb-4 text-brand-dark">
             {categoryInfo.name}
           </h1>
           <div className="flex items-center text-sm text-gray-600">
@@ -127,10 +119,7 @@ export default function CategoryPage() {
                 No products found in this category
               </p>
               <Link href="/" legacyBehavior>
-                <a
-                  className="inline-block px-6 py-2 rounded font-semibold transition-opacity hover:opacity-90"
-                  style={{ backgroundColor: "#bc9c71", color: "#1c140c" }}
-                >
+                <a className="inline-block px-6 py-2 rounded font-semibold transition-opacity hover:opacity-90 bg-brand text-brand-dark">
                   Continue Shopping
                 </a>
               </Link>

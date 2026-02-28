@@ -1,5 +1,10 @@
 # 🎯 willy COLLECTION - Premium E-Commerce Platform
 
+> **Development notes:** The backend now auto-seeds critical data on start when not in production. A default admin (`admin@example.com` / `password123`) is guaranteed, and sample sneakers,
+> brands, categories and banners are created. The in-memory rate limiter can be reset
+> or bypassed via `X-Reset-Rate-Limit` / `X-Bypass-Rate-Limit` headers, which is useful
+> for automated tests (see `testsprite_tests/`).
+
 > **Step into Style** - A modern, luxury-focused sneaker marketplace rebuilt from scratch with premium design, excellent performance, and complete accessibility.
 
 ![Status](https://img.shields.io/badge/status-production%20ready-brightgreen)
@@ -54,6 +59,19 @@ npm install
 cp frontend/.env.example frontend/.env.local
 cp backend/.env.example backend/.env
 
+# If you plan to test MPESA payments you will need Lipana sandbox credentials.
+# 1. Sign up at https://developer.lipana.com or the appropriate sandbox portal.
+# 2. Note the API token, shortcode, passkey, and callback URL.
+# 3. Add them to `backend/.env` (see the comments at the bottom of
+#    `.env.example`).
+#
+# Example:
+# LIPANA_TOKEN=abc123
+# LIPANA_SHORTCODE=600000
+# LIPANA_PASSKEY=secret
+# LIPANA_CALLBACK_URL=https://localhost:4000/api/payments/mpesa/callback
+# LIPANA_ENV=sandbox
+
 # Initialize database
 cd backend
 npx prisma migrate dev
@@ -65,11 +83,19 @@ npm run seed
 ### Start Development Servers
 
 ```bash
-# Terminal 1 - Backend (port 4000)
+# Terminal 1 - Backend (default port 4000)
+# if the port is in use you will see an error; kill the conflicting process or
+# set PORT=XXXX before running.
 cd backend
 npm run dev
 
-# Terminal 2 - Frontend (port 3000)
+# If the backend fails during seeding with foreign-key errors, the database
+# may contain leftover rows. Reset it with:
+#   npx prisma migrate reset --force
+# and then restart the server.
+
+# Terminal 2 - Frontend (default port 3000)
+# Next.js will automatically pick the next free port (3001, 3002, ...)
 cd frontend
 npm run dev
 ```
@@ -569,5 +595,6 @@ Your **willy COLLECTION** e-commerce platform is now:
 **Last Updated:** February 16, 2026
 
 Made with ❤️ by william otieno dancun
-#   w i l l y - c o l l e c t i o n  
+#   w i l l y - c o l l e c t i o n 
+ 
  

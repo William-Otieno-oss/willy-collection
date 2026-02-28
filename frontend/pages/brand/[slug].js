@@ -82,7 +82,7 @@ export default function BrandPage() {
     <Layout>
       <div className="bg-gray-50 py-12 px-4 border-b border-gray-200">
         <div className="max-w-7xl mx-auto">
-          <h1 className="text-4xl font-bold mb-4" style={{ color: "#1c140c" }}>
+          <h1 className="text-4xl font-bold mb-4 text-brand-dark">
             {brand.name}
           </h1>
           {brand.description && (
@@ -102,15 +102,12 @@ export default function BrandPage() {
         <div className="max-w-7xl mx-auto">
           {sneakers.length > 0 ? (
             <>
-              <h2
-                className="text-2xl font-bold mb-8"
-                style={{ color: "#1c140c" }}
-              >
+              <h2 className="text-2xl font-bold mb-8 text-brand-dark">
                 {brand.name} Sneakers
               </h2>
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
                 {sneakers.map((sneaker) => (
-                  <SneakerCard key={sneaker.id} sneaker={sneaker} />
+                  <SneakerCard key={sneaker.id} s={sneaker} />
                 ))}
               </div>
             </>

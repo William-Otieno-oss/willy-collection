@@ -28,7 +28,9 @@ export default function Shipping() {
                 <h3 className="font-bold text-xl mb-2 text-green-700">
                   Free Delivery
                 </h3>
-                <p className="text-gray-700 text-lg">Nairobi & Thika</p>
+                <p className="text-gray-700 text-lg">
+                  Within Nairobi CBD; other areas delivery fee may apply
+                </p>
               </div>
               <div className="bg-blue-50 p-8 rounded-lg border-l-4 border-blue-500">
                 <h3 className="font-bold text-xl mb-2 text-blue-700">
@@ -50,7 +52,7 @@ export default function Shipping() {
               <div className="space-y-6">
                 <div>
                   <h3 className="font-bold text-xl text-gray-900 mb-2">
-                    Nairobi & Thika
+                    Nairobi CBD (other areas delivery fee may apply)
                   </h3>
                   <p className="text-gray-700 text-lg">
                     Same day or next day delivery

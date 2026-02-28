@@ -1,13 +1,22 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/router";
 import Layout from "../../components/Layout";
-import { API_BASE } from "../../lib/api";
+import {
+  API_BASE,
+  fetcher,
+  adminFetcher,
+  adminPostRequest,
+  adminPutRequest,
+  adminDeleteRequest,
+  APIError,
+} from "../../lib/api";
 
 export default function AdminBanners() {
   const router = useRouter();
   const [authenticated, setAuthenticated] = useState(false);
   const [banners, setBanners] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [errorMsg, setErrorMsg] = useState("");
   const [formData, setFormData] = useState({
     title: "",
     subtitle: "",
@@ -22,28 +31,27 @@ export default function AdminBanners() {
 
   // Check authentication on mount
   useEffect(() => {
-    const token = localStorage.getItem("admin_token");
-    const expiresAt = localStorage.getItem("admin_token_expires");
-
-    if (!token || !expiresAt || parseInt(expiresAt) <= Date.now()) {
-      localStorage.removeItem("admin_token");
-      localStorage.removeItem("admin_token_expires");
-      router.push("/admin/login");
-      return;
-    }
-
-    setAuthenticated(true);
-    fetchBanners();
+    const check = async () => {
+      try {
+        await fetchBanners();
+        setAuthenticated(true);
+      } catch (err) {
+        if (err.status === 401) router.push("/admin/login");
+      }
+    };
+    check();
   }, [router]);
 
   const fetchBanners = async () => {
     try {
       setLoading(true);
-      const response = await fetch(`${API_BASE}/api/banners`);
-      const data = await response.json();
+      setErrorMsg("");
+      const data = await fetcher(`/api/banners`);
       setBanners(data);
+      // Note: fetcher throws on error, so we only reach here on success
     } catch (error) {
-      // Error handled via error state
+      setErrorMsg("Network error fetching banners");
+      setBanners([]);
     } finally {
       setLoading(false);
     }
@@ -64,6 +72,7 @@ export default function AdminBanners() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setErrorMsg("");
     try {
       const url = editingId
         ? `${API_BASE}/api/banners/${editingId}`
@@ -71,22 +80,23 @@ export default function AdminBanners() {
 
       const method = editingId ? "PUT" : "POST";
 
-      const response = await fetch(url, {
-        method,
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${localStorage.getItem("admin_token") || ""}`,
-        },
-        body: JSON.stringify(formData),
-      });
-
-      if (!response.ok) throw new Error("Failed to save banner");
-
-      await fetchBanners();
-      resetForm();
+      try {
+        if (editingId) {
+          await adminPutRequest(url, formData);
+        } else {
+          await adminPostRequest(url, formData);
+        }
+        await fetchBanners();
+        resetForm();
+      } catch (err) {
+        setErrorMsg(
+          (err.data && err.data.error && err.data.error.message) ||
+            "Failed to save banner",
+        );
+        return;
+      }
     } catch (error) {
-      // Error handled via error state
-      alert("Error saving banner: " + error.message);
+      setErrorMsg("Network error saving banner");
     }
   };
 
@@ -97,21 +107,20 @@ export default function AdminBanners() {
 
   const handleDelete = async (id) => {
     if (!confirm("Are you sure you want to delete this banner?")) return;
-
+    setErrorMsg("");
     try {
-      const response = await fetch(`${API_BASE}/api/banners/${id}`, {
-        method: "DELETE",
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem("admin_token") || ""}`,
-        },
-      });
-
-      if (!response.ok) throw new Error("Failed to delete banner");
-
-      await fetchBanners();
+      try {
+        await adminDeleteRequest(`/api/banners/${id}`);
+        await fetchBanners();
+      } catch (err) {
+        setErrorMsg(
+          (err.data && err.data.error && err.data.error.message) ||
+            "Failed to delete banner",
+        );
+        return;
+      }
     } catch (error) {
-      // Error handled via error state
-      alert("Error deleting banner: " + error.message);
+      setErrorMsg("Network error deleting banner");
     }
   };
 
@@ -133,7 +142,11 @@ export default function AdminBanners() {
     <Layout>
       <div className="max-w-6xl mx-auto py-12 px-4">
         <h1 className="text-4xl font-bold mb-8">Manage Banners</h1>
-
+        {errorMsg && (
+          <div style={{ color: "#b00", marginBottom: 16, fontWeight: "bold" }}>
+            {errorMsg}
+          </div>
+        )}
         {/* Form Section */}
         <div className="bg-white rounded-lg shadow-md p-8 mb-8">
           <h2 className="text-2xl font-bold mb-6">

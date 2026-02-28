@@ -1,885 +1,361 @@
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/router";
 import Layout from "../components/Layout";
 import PageHeader from "../components/PageHeader";
 import Card from "../components/Card";
 import Button from "../components/Button";
-import { LoadingSpinner, EmptyState } from "../components/Loading";
-import { postRequest, validateOrder, APIError } from "../lib/api";
 
-const DELIVERY_OPTIONS = [
-  {
-    id: "Standard",
-    name: "Standard Delivery",
-    description: "2-3 business days",
-    price: 0,
-    icon: "📦",
-  },
-  {
-    id: "Express",
-    name: "Express Delivery",
-    description: "Next business day",
-    price: 500,
-    icon: "⚡",
-  },
-  {
-    id: "Pickup",
-    name: "Pickup at NextGen Mall",
-    description: "South B, Nairobi",
-    price: 0,
-    icon: "📍",
-  },
-];
+const TAX_RATE = 0.16;
 
-const PAYMENT_METHODS = [
-  {
-    id: "mpesa",
-    name: "M-Pesa",
-    description: "Pay securely via M-Pesa",
-    icon: "📱",
-  },
-  {
-    id: "cod",
-    name: "Cash on Delivery",
-    description: "Pay when your order arrives",
-    icon: "💵",
-  },
-];
-
-// Validation helpers
-function isValidEmail(email) {
-  if (!email) return true; // Email is optional
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  return emailRegex.test(email) && email.length <= 254;
-}
-
-function validateCheckoutForm(formData) {
-  const errors = {};
-
-  // Full name validation
-  if (!formData.fullName || typeof formData.fullName !== "string") {
-    errors.fullName = "Full name is required";
-  } else {
-    const trimmed = formData.fullName.trim();
-    if (trimmed.length < 2) {
-      errors.fullName = "Full name must be at least 2 characters";
-    } else if (trimmed.length > 255) {
-      errors.fullName = "Full name is too long";
-    }
+function safeLoadCart() {
+  try {
+    const raw = localStorage.getItem("cart");
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    // Basic sanitation: ensure minimal fields exist to avoid runtime errors
+    return parsed.map((it) => ({
+      id: Number(it.id) || 0,
+      modelName: String(it.modelName || it.name || "Unknown"),
+      price: Number(it.price) || 0,
+      quantity: Math.max(1, Math.floor(Number(it.quantity) || 1)),
+      size: String(it.size || "N/A"),
+      image:
+        it.image || (it.images && it.images[0] && it.images[0].url) || null,
+      brand: it.brand || null,
+    }));
+  } catch (e) {
+    return [];
   }
-
-  // Email validation (optional but if provided, must be valid)
-  if (formData.email && !isValidEmail(formData.email.trim())) {
-    errors.email = "Please enter a valid email address";
-  }
-
-  // Phone validation
-  if (!formData.phone || typeof formData.phone !== "string") {
-    errors.phone = "Phone number is required";
-  } else {
-    const trimmed = formData.phone.trim();
-    if (trimmed.length < 7) {
-      errors.phone = "Phone number must be at least 7 digits";
-    } else if (trimmed.length > 50) {
-      errors.phone = "Phone number is too long";
-    }
-  }
-
-  // Address validation
-  if (!formData.address || typeof formData.address !== "string") {
-    errors.address = "Delivery address is required";
-  } else {
-    const trimmed = formData.address.trim();
-    if (trimmed.length < 2) {
-      errors.address = "Address must be at least 2 characters";
-    } else if (trimmed.length > 500) {
-      errors.address = "Address is too long";
-    }
-  }
-
-  // Optional city validation
-  if (formData.city && formData.city.length > 100) {
-    errors.city = "City name is too long";
-  }
-
-  // Optional zipCode validation
-  if (formData.zipCode && formData.zipCode.length > 20) {
-    errors.zipCode = "ZIP code is too long";
-  }
-
-  // Optional notes validation
-  if (formData.notes && formData.notes.length > 1000) {
-    errors.notes = "Order notes are too long (max 1000 characters)";
-  }
-
-  return errors;
-}
-
-// Validate cart items before submission
-function validateCartItems(cart) {
-  if (!Array.isArray(cart) || cart.length === 0) {
-    return "Cart is empty";
-  }
-
-  if (cart.length > 100) {
-    return "Too many items in cart (max 100)";
-  }
-
-  for (const item of cart) {
-    if (typeof item.id !== "number" || item.id < 1) {
-      return "Invalid item in cart";
-    }
-    if (typeof item.price !== "number" || item.price < 0) {
-      return "Invalid price in cart";
-    }
-    if (typeof item.quantity !== "number" || item.quantity < 1 || item.quantity > 100) {
-      return "Invalid quantity in cart";
-    }
-  }
-
-  return null;
 }
 
 export default function Checkout() {
   const router = useRouter();
   const [cart, setCart] = useState([]);
-  const [loading, setLoading] = useState(true);
+
+  // form state
+  const [customerName, setCustomerName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [location, setLocation] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState("cash");
+  const [mpesaNumber, setMpesaNumber] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [errors, setErrors] = useState({});
-  const [globalError, setGlobalError] = useState("");
-  const [successMessage, setSuccessMessage] = useState("");
-
-  const [formData, setFormData] = useState({
-    fullName: "",
-    email: "",
-    phone: "",
-    address: "",
-    city: "",
-    zipCode: "",
-    notes: "",
-  });
-
-  const [selectedDelivery, setSelectedDelivery] = useState("Standard");
-  const [selectedPayment, setSelectedPayment] = useState("cod");
+  const [orderError, setOrderError] = useState("");
+  const [orderSuccess, setOrderSuccess] = useState(false);
+  const [orderId, setOrderId] = useState(null);
+  const [checkoutRequestId, setCheckoutRequestId] = useState(null);
+  const [paymentStatus, setPaymentStatus] = useState(null); // "pending" | "paid" | "failed"
+  const [polling, setPolling] = useState(false);
 
   useEffect(() => {
-    try {
-      const savedCart = localStorage.getItem("cart");
-      if (!savedCart) {
-        setCart([]);
-      } else {
-        const parsed = JSON.parse(savedCart);
-        if (Array.isArray(parsed)) {
-          setCart(parsed);
-        } else {
-          setCart([]);
-        }
-      }
-    } catch (e) {
-      // Error handled via state, user sees UI feedback
-      setCart([]);
-    } finally {
-      setLoading(false);
-    }
+    setCart(safeLoadCart());
   }, []);
 
-  const handleInputChange = (e) => {
-    const { name, value } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
-    // Clear error for this field when user starts typing
-    if (errors[name]) {
-      setErrors((prev) => ({ ...prev, [name]: "" }));
-    }
-  };
+  const subtotal = cart.reduce(
+    (s, it) => s + (Number(it.price) || 0) * (it.quantity || 1),
+    0,
+  );
+  const tax = Math.round(subtotal * TAX_RATE);
+  const total = subtotal + tax;
 
-  const deliveryOption = DELIVERY_OPTIONS.find((d) => d.id === selectedDelivery);
-
-  const subtotal = cart.reduce((sum, item) => {
-    const price = Math.max(0, item.price || 0);
-    const qty = Math.max(1, item.quantity || 1);
-    return sum + price * qty;
-  }, 0);
-
-  const tax = Math.round(subtotal * 0.16);
-  const deliveryFee = deliveryOption?.price || 0;
-  const total = subtotal + tax + deliveryFee;
-
-  const handleSubmit = async (e) => {
+  const handlePlaceOrder = async (e) => {
     e.preventDefault();
-    setGlobalError("");
-    setSuccessMessage("");
-    setErrors({});
-
-    // Validate form
-    const formErrors = validateCheckoutForm(formData);
-    if (Object.keys(formErrors).length > 0) {
-      setErrors(formErrors);
-      return;
-    }
-
-    // Validate cart
-    const cartError = validateCartItems(cart);
-    if (cartError) {
-      setGlobalError(cartError);
-      return;
-    }
-
-    // Validate delivery method
-    if (!["Standard", "Express", "Pickup"].includes(selectedDelivery)) {
-      setGlobalError("Invalid delivery method selected");
-      return;
-    }
-
-    // Validate payment method
-    if (!["mpesa", "cod"].includes(selectedPayment)) {
-      setGlobalError("Invalid payment method selected");
-      return;
-    }
-
+    if (cart.length === 0) return;
     setSubmitting(true);
-
+    setOrderError("");
     try {
-      // Build order data
-      const orderItems = cart.map((item) => ({
-        sneakerId: item.id,
-        quantity: Math.floor(Math.max(1, Math.min(item.quantity || 1, 100))),
-        price: Math.max(0, item.price || 0),
-      }));
-
-      const orderData = {
-        customerName: formData.fullName.trim(),
-        phone: formData.phone.trim(),
-        items: orderItems,
-        location: formData.address.trim(),
-        deliveryMethod: selectedDelivery,
-      };
-
-      // Validate against backend expectations
-      validateOrder(orderData);
-
-      // Submit order
-      const response = await postRequest("/api/orders", orderData);
-
-      if (!response) {
-        throw new APIError("No response from server", 500, null);
-      }
-
-      if (!response.id) {
-        throw new APIError("Invalid response from server", 500, null);
-      }
-
-      // Clear cart on success
-      localStorage.removeItem("cart");
-      setCart([]);
-
-      setSuccessMessage(`✅ Order #${response.id} placed successfully! We'll contact you shortly.`);
-
-      // Redirect after a brief delay
-      setTimeout(() => {
-        router.push("/");
-      }, 2000);
-    } catch (error) {
-      // Error displayed to user via setCheckoutError()
-
-      if (error instanceof APIError) {
-        if (error.status === 400) {
-          setGlobalError("Invalid order data. Please check your inputs.");
-        } else if (error.status === 408) {
-          setGlobalError("Request timeout. Please check your connection and try again.");
-        } else if (error.status === 0) {
-          setGlobalError("Network error. Please check your connection and try again.");
+      if (paymentMethod === "mpesa") {
+        // initiate payment before creating order
+        const payResp = await fetch("/api/payments/mpesa", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            orderId: null, // order not created yet, server can create provisional order or attach later
+            mpesaNumber,
+            amount: cart.reduce((s, it) => s + it.price * it.quantity, 0),
+            // alternatively send full cart and create order server-side after payment
+            items: cart.map((it) => ({
+              sneakerId: it.id,
+              price: it.price,
+              quantity: it.quantity,
+              sneakerName: it.modelName,
+              size: it.size,
+            })),
+            customerName,
+            phone,
+            location,
+          }),
+        });
+        if (payResp.ok) {
+          const data = await payResp.json().catch(() => ({}));
+          const reqId = data.checkoutRequestId;
+          const ordId = data.orderId;
+          setCheckoutRequestId(reqId || null);
+          setOrderId(ordId || null);
+          setPaymentStatus("pending");
+          // start polling endpoint for status
+          setPolling(true);
         } else {
-          setGlobalError(error.message || "Failed to place order. Please try again.");
+          const errdata = await payResp.json().catch(() => ({}));
+          setOrderError(errdata.message || "Failed to initiate payment");
         }
       } else {
-        setGlobalError("An unexpected error occurred. Please try again.");
+        const payload = {
+          customerName,
+          phone,
+          location,
+          items: cart.map((it) => ({
+            sneakerId: it.id,
+            price: it.price,
+            quantity: it.quantity,
+            sneakerName: it.modelName,
+            size: it.size,
+          })),
+        };
+        const res = await fetch("/api/orders", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if (res.ok) {
+          const data = await res.json().catch(() => ({}));
+          setOrderSuccess(true);
+          setOrderId(data.id || null);
+          // clear cart
+          localStorage.removeItem("cart");
+          window.dispatchEvent(new Event("cartUpdated"));
+          // stay on page and show confirmation
+        } else {
+          const data = await res.json().catch(() => ({}));
+          setOrderError(data.error?.message || "Failed to place order");
+        }
       }
+    } catch (err) {
+      setOrderError(err.message || "Failed to place order");
+    } finally {
       setSubmitting(false);
     }
   };
 
-  if (loading) {
-    return (
-      <Layout>
-        <LoadingSpinner overlay={false} />
-      </Layout>
-    );
-  }
-
-  if (cart.length === 0) {
-    return (
-      <Layout>
-        <PageHeader
-          title="Checkout"
-          subtitle="Complete your order"
-          background={true}
-        />
-        <div className="max-w-6xl mx-auto px-4 py-20">
-          <Card className="p-20 text-center">
-            <EmptyState
-              icon="🛒"
-              title="Your Cart is Empty"
-              description="Add some sneakers to your cart before checking out."
-              action={
-                <button
-                  onClick={() => router.push("/")}
-                  className="px-8 py-3 bg-accent hover:bg-orange-600 text-gray-900 font-bold rounded-lg transition-all"
-                >
-                  Continue Shopping
-                </button>
+  // effect to poll payment status when needed
+  useEffect(() => {
+    let interval;
+    if (polling && checkoutRequestId) {
+      interval = setInterval(async () => {
+        try {
+          const res = await fetch(
+            `/api/payments/mpesa/status/${encodeURIComponent(
+              checkoutRequestId,
+            )}`,
+          );
+          if (res.ok) {
+            const data = await res.json().catch(() => ({}));
+            if (data.status && data.status !== paymentStatus) {
+              setPaymentStatus(data.status);
+              if (data.status === "paid") {
+                // payment succeeded, clear cart and stop polling
+                localStorage.removeItem("cart");
+                window.dispatchEvent(new Event("cartUpdated"));
+                setOrderSuccess(true);
+                setPolling(false);
               }
-            />
-          </Card>
-        </div>
-      </Layout>
-    );
-  }
+              if (data.status === "failed") {
+                setOrderError("Payment failed. Please try again.");
+                setPolling(false);
+              }
+            }
+          }
+        } catch (e) {
+          // ignore network errors, try again next interval
+        }
+      }, 5000);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [polling, checkoutRequestId, paymentStatus]);
 
   return (
     <Layout>
       <PageHeader
-        title="Secure Checkout"
-        subtitle="Complete your sneaker purchase"
+        title="Checkout"
+        subtitle="Review your order"
         background={true}
       />
 
-      <div className="max-w-7xl mx-auto px-4 py-16">
-        {globalError && (
-          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
-            {globalError}
-            <button
-              onClick={() => setGlobalError("")}
-              className="ml-4 font-semibold hover:text-red-900"
-            >
-              Dismiss
-            </button>
-          </div>
-        )}
+      <div className="max-w-4xl mx-auto px-4 py-16">
+        <Card className="p-6">
+          <h2 className="text-xl font-bold mb-4">Order Summary</h2>
 
-        {successMessage && (
-          <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-lg text-green-700 text-sm">
-            {successMessage}
-          </div>
-        )}
-
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Checkout Form */}
-          <form onSubmit={handleSubmit} className="lg:col-span-2 space-y-8" noValidate>
-            {/* Shipping Information */}
-            <Card className="p-8 animate-slideUp">
-              <h2 className="text-2xl font-bold text-gray-900 mb-6 flex items-center gap-3">
-                <span className="text-3xl">📦</span> Shipping Information
-              </h2>
-              <div className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">
-                      Full Name *
-                    </label>
-                    <input
-                      type="text"
-                      name="fullName"
-                      value={formData.fullName}
-                      onChange={handleInputChange}
-                      className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:border-transparent transition-all ${
-                        errors.fullName
-                          ? "border-red-300 focus:ring-red-200"
-                          : "border-gray-200 focus:ring-accent"
-                      }`}
-                      placeholder="Your full name"
-                      disabled={submitting}
-                    />
-                    {errors.fullName && (
-                      <p className="mt-1 text-sm text-red-600">{errors.fullName}</p>
-                    )}
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">
-                      Email (Optional)
-                    </label>
-                    <input
-                      type="email"
-                      name="email"
-                      value={formData.email}
-                      onChange={handleInputChange}
-                      className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:border-transparent transition-all ${
-                        errors.email
-                          ? "border-red-300 focus:ring-red-200"
-                          : "border-gray-200 focus:ring-accent"
-                      }`}
-                      placeholder="your@email.com"
-                      disabled={submitting}
-                    />
-                    {errors.email && (
-                      <p className="mt-1 text-sm text-red-600">{errors.email}</p>
-                    )}
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">
-                    Phone Number *
-                  </label>
-                  <input
-                    type="tel"
-                    name="phone"
-                    value={formData.phone}
-                    onChange={handleInputChange}
-                    className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:border-transparent transition-all ${
-                      errors.phone
-                        ? "border-red-300 focus:ring-red-200"
-                        : "border-gray-200 focus:ring-accent"
-                    }`}
-                    placeholder="+254 797 062 606"
-                    disabled={submitting}
-                  />
-                  {errors.phone && (
-                    <p className="mt-1 text-sm text-red-600">{errors.phone}</p>
-                  )}
-                </div>
-
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">
-                    Delivery Address *
-                  </label>
-                  <input
-                    type="text"
-                    name="address"
-                    value={formData.address}
-                    onChange={handleInputChange}
-                    className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:border-transparent transition-all ${
-                      errors.address
-                        ? "border-red-300 focus:ring-red-200"
-                        : "border-gray-200 focus:ring-accent"
-                    }`}
-                    placeholder="Street address"
-                    disabled={submitting}
-                  />
-                  {errors.address && (
-                    <p className="mt-1 text-sm text-red-600">{errors.address}</p>
-                  )}
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">
-                      City (Optional)
-                    </label>
-                    <input
-                      type="text"
-                      name="city"
-                      value={formData.city}
-                      onChange={handleInputChange}
-                      className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:border-transparent transition-all ${
-                        errors.city
-                          ? "border-red-300 focus:ring-red-200"
-                          : "border-gray-200 focus:ring-accent"
-                      }`}
-                      placeholder="Nairobi"
-                      disabled={submitting}
-                    />
-                    {errors.city && (
-                      <p className="mt-1 text-sm text-red-600">{errors.city}</p>
-                    )}
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">
-                      ZIP Code (Optional)
-                    </label>
-                    <input
-                      type="text"
-                      name="zipCode"
-                      value={formData.zipCode}
-                      onChange={handleInputChange}
-                      className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:border-transparent transition-all ${
-                        errors.zipCode
-                          ? "border-red-300 focus:ring-red-200"
-                          : "border-gray-200 focus:ring-accent"
-                      }`}
-                      placeholder="00100"
-                      disabled={submitting}
-                    />
-                    {errors.zipCode && (
-                      <p className="mt-1 text-sm text-red-600">{errors.zipCode}</p>
-                    )}
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">
-                    Order Notes (Optional)
-                  </label>
-                  <textarea
-                    name="notes"
-                    value={formData.notes}
-                    onChange={handleInputChange}
-                    rows="3"
-                    className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:border-transparent transition-all ${
-                      errors.notes
-                        ? "border-red-300 focus:ring-red-200"
-                        : "border-gray-200 focus:ring-accent"
-                    }`}
-                    placeholder="Any special delivery instructions..."
-                    disabled={submitting}
-                  />
-                  {errors.notes && (
-                    <p className="mt-1 text-sm text-red-600">{errors.notes}</p>
-                  )}
-                </div>
+          {/* customer form */}
+          <form onSubmit={handlePlaceOrder} className="space-y-4 mb-6">
+            <div>
+              <label className="block text-sm font-medium text-neutral-700">
+                Name
+              </label>
+              <input
+                required
+                value={customerName}
+                onChange={(e) => setCustomerName(e.target.value)}
+                className="mt-1 block w-full border border-neutral-300 rounded-md px-4 py-3 focus:outline-none focus:ring-2 focus:ring-brand/50 focus:border-transparent transition-all placeholder:text-neutral-400"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-neutral-700">
+                Phone
+              </label>
+              <input
+                required
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                className="mt-1 block w-full border border-neutral-300 rounded-md px-4 py-3 focus:outline-none focus:ring-2 focus:ring-brand/50 focus:border-transparent transition-all placeholder:text-neutral-400"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-neutral-700">
+                Delivery address / location
+              </label>
+              <input
+                required
+                value={location}
+                onChange={(e) => setLocation(e.target.value)}
+                className="mt-1 block w-full border border-neutral-300 rounded-md px-4 py-3 focus:outline-none focus:ring-2 focus:ring-brand/50 focus:border-transparent transition-all placeholder:text-neutral-400"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-neutral-700">
+                Payment method
+              </label>
+              <select
+                value={paymentMethod}
+                onChange={(e) => setPaymentMethod(e.target.value)}
+                className="mt-1 block w-full border border-neutral-300 rounded-md px-4 py-3 focus:outline-none focus:ring-2 focus:ring-brand/50 focus:border-transparent transition-all"
+              >
+                \n <option value="cash">Cash on delivery</option>
+                <option value="mpesa">M-Pesa</option>\n{" "}
+              </select>
+            </div>
+            {paymentMethod === "mpesa" && (
+              <div>
+                <label className="block text-sm font-medium text-neutral-700">
+                  M-Pesa phone
+                </label>
+                <input
+                  required={paymentMethod === "mpesa"}
+                  value={mpesaNumber}
+                  onChange={(e) => setMpesaNumber(e.target.value)}
+                  className="mt-1 block w-full border border-neutral-300 rounded-lg shadow-sm p-2.5 focus:ring-2 focus:ring-accent focus:border-transparent transition-all"
+                />
               </div>
-            </Card>
-
-            {/* Delivery Method */}
-            <Card
-              className="p-8 animate-slideUp"
-              style={{ animationDelay: "100ms" }}
-            >
-              <h2 className="text-2xl font-bold text-gray-900 mb-6 flex items-center gap-3">
-                <span className="text-3xl">🚚</span> Delivery Method
-              </h2>
-              <div className="space-y-3">
-                {DELIVERY_OPTIONS.map((option) => (
-                  <label
-                    key={option.id}
-                    className={`p-4 border-2 rounded-lg cursor-pointer transition-all ${
-                      selectedDelivery === option.id
-                        ? "border-accent bg-accent/5"
-                        : "border-gray-200 hover:border-gray-300"
-                    } ${submitting ? "opacity-50 cursor-not-allowed" : ""}`}
+            )}
+            <div className="flex gap-3">
+              <Button
+                type="button"
+                onClick={() => router.push("/")}
+                variant="secondary"
+              >
+                Continue Shopping
+              </Button>
+              <Button type="submit" variant="primary" disabled={submitting}>
+                {submitting
+                  ? paymentMethod === "mpesa"
+                    ? "Requesting payment…"
+                    : "Placing…"
+                  : paymentMethod === "mpesa"
+                    ? "Pay with M‑Pesa"
+                    : "Place Order"}
+              </Button>
+            </div>
+            {orderError && <p className="text-red-600 text-sm">{orderError}</p>}
+            {paymentMethod === "mpesa" && paymentStatus === "pending" && (
+              <p className="text-yellow-600 text-sm">
+                Payment request sent! Waiting for confirmation...
+              </p>
+            )}
+            {paymentMethod === "mpesa" && paymentStatus === "paid" && (
+              <div className="space-y-2">
+                <p className="text-green-600 text-sm">
+                  Payment successful! Thank you
+                  {orderId ? ` (Order #${orderId})` : ""}.
+                </p>
+                <div className="flex gap-3">
+                  <Button
+                    type="button"
+                    variant="primary"
+                    onClick={() => router.push("/")}
                   >
-                    <div className="flex items-center gap-4">
-                      <input
-                        type="radio"
-                        name="delivery"
-                        value={option.id}
-                        checked={selectedDelivery === option.id}
-                        onChange={(e) => setSelectedDelivery(e.target.value)}
-                        className="w-5 h-5"
-                        disabled={submitting}
-                      />
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2">
-                          <span className="text-2xl">{option.icon}</span>
-                          <div>
-                            <p className="font-bold text-gray-900">
-                              {option.name}
-                            </p>
-                            <p className="text-sm text-gray-600">
-                              {option.description}
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <p className="font-bold text-gray-900">
-                          {option.price === 0 ? "FREE" : `KES ${option.price}`}
-                        </p>
-                      </div>
-                    </div>
-                  </label>
-                ))}
+                    Continue Shopping
+                  </Button>
+                </div>
               </div>
-            </Card>
-
-            {/* Payment Method */}
-            <Card
-              className="p-8 animate-slideUp"
-              style={{ animationDelay: "200ms" }}
-            >
-              <h2 className="text-2xl font-bold text-gray-900 mb-6 flex items-center gap-3">
-                <span className="text-3xl">💳</span> Payment Method
-              </h2>
-              <div className="space-y-3">
-                {PAYMENT_METHODS.map((method) => (
-                  <label
-                    key={method.id}
-                    className={`p-4 border-2 rounded-lg cursor-pointer transition-all ${
-                      selectedPayment === method.id
-                        ? "border-accent bg-accent/5"
-                        : "border-gray-200 hover:border-gray-300"
-                    } ${submitting ? "opacity-50 cursor-not-allowed" : ""}`}
+            )}
+            {paymentMethod !== "mpesa" && orderSuccess && (
+              <div className="space-y-2">
+                <p className="text-green-600 text-sm">
+                  {`Order placed! Thank you${orderId ? ` (Order #${orderId})` : ""}.`}
+                </p>
+                <div className="flex gap-3">
+                  <Button
+                    type="button"
+                    variant="primary"
+                    onClick={() => router.push("/")}
                   >
-                    <div className="flex items-center gap-4">
-                      <input
-                        type="radio"
-                        name="payment"
-                        value={method.id}
-                        checked={selectedPayment === method.id}
-                        onChange={(e) => setSelectedPayment(e.target.value)}
-                        className="w-5 h-5"
-                        disabled={submitting}
-                      />
-                      <div className="flex-1 flex items-center gap-3">
-                        <span className="text-2xl">{method.icon}</span>
-                        <div>
-                          <p className="font-bold text-gray-900">
-                            {method.name}
-                          </p>
-                          <p className="text-sm text-gray-600">
-                            {method.description}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  </label>
-                ))}
+                    Continue Shopping
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => router.push("/cart")}
+                  >
+                    View Cart
+                  </Button>
+                </div>
               </div>
-            </Card>
+            )}
           </form>
 
-          {/* Order Summary */}
-          <div>
-            <Card className="p-8 sticky top-24 animate-slideInRight space-y-6">
-              <h2 className="text-2xl font-bold text-gray-900">
-                Order Summary
-              </h2>
-
-              {/* Items */}
-              <div className="max-h-64 overflow-y-auto space-y-3 pb-6 border-b border-gray-200">
-                {cart.map((item) => (
-                  <div
-                    key={item.id}
-                    className="flex justify-between gap-4 text-sm"
-                  >
-                    <div>
-                      <p className="font-semibold text-gray-900">
-                        {item.modelName || item.name || "Item"}
-                      </p>
-                      <p className="text-gray-600">
-                        Size {item.size || "N/A"} × {item.quantity || 1}
-                      </p>
-                    </div>
-                    <p className="font-semibold text-gray-900">
-                      KES {(Math.max(0, item.price || 0) * (item.quantity || 1)).toFixed(0)}
-                    </p>
-                  </div>
-                ))}
-                    className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-accent focus:border-transparent"
-                    placeholder="+254 797 062 606"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">
-                    Delivery Address *
-                  </label>
-                  <input
-                    type="text"
-                    name="address"
-                    value={formData.address}
-                    onChange={handleInputChange}
-                    required
-                    className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-accent focus:border-transparent"
-                    placeholder="Street address"
-                  />
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {cart.length === 0 ? (
+            <p className="text-sm text-gray-600 mb-6">Your cart is empty.</p>
+          ) : (
+            <div className="space-y-4 mb-6">
+              {cart.map((it) => (
+                <div key={it.id} className="flex justify-between items-center">
                   <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">
-                      City
-                    </label>
-                    <input
-                      type="text"
-                      name="city"
-                      value={formData.city}
-                      onChange={handleInputChange}
-                      className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-accent focus:border-transparent"
-                      placeholder="Nairobi"
-                    />
+                    <div className="font-semibold">{it.modelName}</div>
+                    <div className="text-xs text-gray-500">Size: {it.size}</div>
                   </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">
-                      ZIP Code
-                    </label>
-                    <input
-                      type="text"
-                      name="zipCode"
-                      value={formData.zipCode}
-                      onChange={handleInputChange}
-                      className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-accent focus:border-transparent"
-                      placeholder="00100"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">
-                    Order Notes
-                  </label>
-                  <textarea
-                    name="notes"
-                    value={formData.notes}
-                    onChange={handleInputChange}
-                    rows="3"
-                    className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-accent focus:border-transparent"
-                    placeholder="Any special delivery instructions..."
-                  />
-                </div>
-              </div>
-            </Card>
-
-            {/* Delivery Method */}
-            <Card
-              className="p-8 animate-slideUp"
-              style={{ animationDelay: "100ms" }}
-            >
-              <h2 className="text-2xl font-bold text-gray-900 mb-6 flex items-center gap-3">
-                <span className="text-3xl">🚚</span> Delivery Method
-              </h2>
-              <div className="space-y-3">
-                {DELIVERY_OPTIONS.map((option) => (
-                  <label
-                    key={option.id}
-                    className={`p-4 border-2 rounded-lg cursor-pointer transition-all ${
-                      selectedDelivery === option.id
-                        ? "border-accent bg-accent/5"
-                        : "border-gray-200 hover:border-gray-300"
-                    }`}
-                  >
-                    <div className="flex items-center gap-4">
-                      <input
-                        type="radio"
-                        name="delivery"
-                        value={option.id}
-                        checked={selectedDelivery === option.id}
-                        onChange={(e) => setSelectedDelivery(e.target.value)}
-                        className="w-5 h-5"
-                      />
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2">
-                          <span className="text-2xl">{option.icon}</span>
-                          <div>
-                            <p className="font-bold text-gray-900">
-                              {option.name}
-                            </p>
-                            <p className="text-sm text-gray-600">
-                              {option.description}
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <p className="font-bold text-gray-900">
-                          {option.price === 0 ? "FREE" : `KES ${option.price}`}
-                        </p>
-                      </div>
-                    </div>
-                  </label>
-                ))}
-              </div>
-            </Card>
-
-            {/* Payment Method */}
-            <Card
-              className="p-8 animate-slideUp"
-              style={{ animationDelay: "200ms" }}
-            >
-              <h2 className="text-2xl font-bold text-gray-900 mb-6 flex items-center gap-3">
-                <span className="text-3xl">💳</span> Payment Method
-              </h2>
-              <div className="space-y-3">
-                {PAYMENT_METHODS.map((method) => (
-                  <label
-                    key={method.id}
-                    className={`p-4 border-2 rounded-lg cursor-pointer transition-all ${
-                      selectedPayment === method.id
-                        ? "border-accent bg-accent/5"
-                        : "border-gray-200 hover:border-gray-300"
-                    }`}
-                  >
-                    <div className="flex items-center gap-4">
-                      <input
-                        type="radio"
-                        name="payment"
-                        value={method.id}
-                        checked={selectedPayment === method.id}
-                        onChange={(e) => setSelectedPayment(e.target.value)}
-                        className="w-5 h-5"
-                      />
-                      <div className="flex-1 flex items-center gap-3">
-                        <span className="text-2xl">{method.icon}</span>
-                        <div>
-                          <p className="font-bold text-gray-900">
-                            {method.name}
-                          </p>
-                          <p className="text-sm text-gray-600">
-                            {method.description}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  </label>
-                ))}
-              </div>
-            </Card>
-          </form>
-
-          {/* Order Summary */}
-          <div>
-            <Card className="p-8 sticky top-24 animate-slideInRight space-y-6">
-              <h2 className="text-2xl font-bold text-gray-900">
-                Order Summary
-              </h2>
-
-              {/* Items */}
-              <div className="max-h-64 overflow-y-auto space-y-3 pb-6 border-b border-gray-200">
-                {cart.map((item) => (
-                  <div
-                    key={item.id}
-                    className="flex justify-between gap-4 text-sm"
-                  >
+                  <div className="text-right">
                     <div>
-                      <p className="font-semibold text-gray-900">
-                        {item.modelName || item.name}
-                      </p>
-                      <p className="text-gray-600">
-                        Size {item.size} × {item.quantity || 1}
-                      </p>
-                    </div>
-                    <p className="font-semibold text-gray-900">
                       KES{" "}
-                      {((item.price || 0) * (item.quantity || 1)).toFixed(0)}
-                    </p>
+                      {((Number(it.price) || 0) * (it.quantity || 1)).toFixed(
+                        0,
+                      )}
+                    </div>
+                    <div className="text-xs text-gray-500">
+                      {it.quantity} × KES {Number(it.price || 0).toFixed(0)}
+                    </div>
                   </div>
-                ))}
-              </div>
+                </div>
+              ))}
+            </div>
+          )}
 
-              {/* Calculations */}
-              <div className="space-y-3">
-                <div className="flex justify-between text-gray-700">
-                  <span>Subtotal</span>
-                  <span className="font-semibold">
-                    KES {subtotal.toFixed(0)}
-                  </span>
-                </div>
-                <div className="flex justify-between text-gray-700">
-                  <span>Tax (16%)</span>
-                  <span className="font-semibold">KES {tax.toFixed(0)}</span>
-                </div>
-                <div className="flex justify-between text-gray-700">
-                  <span>Delivery</span>
-                  <span className="font-semibold">
-                    {deliveryFee === 0 ? "FREE" : `KES ${deliveryFee}`}
-                  </span>
-                </div>
-              </div>
-
-              <div className="pt-6 border-t-2 border-gray-200">
-                <div className="flex justify-between items-baseline mb-8">
-                  <span className="text-lg text-gray-700">Total:</span>
-                  <span className="text-4xl font-bold text-gray-900">
-                    KES {total.toFixed(0)}
-                  </span>
-                </div>
-
-                <Button
-                  type="submit"
-                  variant="primary"
-                  size="lg"
-                  fullWidth
-                  loading={submitting}
-                  disabled={submitting}
-                  onClick={handleSubmit}
-                >
-                  {submitting ? "Processing..." : "Complete Order"}
+          <div className="border-t border-neutral-200 pt-4 space-y-2 mb-6">
+            <div className="flex justify-between text-neutral-700">
+              <span>Subtotal</span>
+              <span className="font-semibold">KES {subtotal.toFixed(0)}</span>
+            </div>
+            <div className="flex justify-between text-neutral-700">
+              <span>Tax ({(TAX_RATE * 100).toFixed(0)}%)</span>
+              <span className="font-semibold">KES {tax.toFixed(0)}</span>
+            </div>
+            <div className="flex justify-between text-gray-900 font-bold text-lg">
+              <span>Total</span>
+              <span>KES {total.toFixed(0)}</span>
+            </div>
+          </div>
+        </Card>
+      </div>
+    </Layout>
+  );
+}

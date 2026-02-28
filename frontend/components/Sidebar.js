@@ -88,7 +88,7 @@ export default function Sidebar({ items, width = "w-48", onCategoryHover }) {
           aria-label="Open categories"
           aria-expanded={open}
           aria-controls="offcanvas-categories"
-          className="p-3 bg-white/90 rounded-md shadow-sm micro-hover"
+          className="p-3 bg-white/90 rounded-sm shadow-xs micro-hover"
         >
           <svg
             className="w-5 h-5"
@@ -139,11 +139,11 @@ export default function Sidebar({ items, width = "w-48", onCategoryHover }) {
                   legacyBehavior
                 >
                   <a
-                    className="menu-item block px-5 py-3 text-sm transition-colors hover:bg-gray-50 focus:outline-none focus:bg-gray-100"
+                    className="menu-item block px-5 py-3.5 text-sm transition-colors hover:bg-neutral-50 focus:outline-none focus:bg-neutral-50"
                     style={{
                       borderBottom:
                         idx !== navItems.length - 1
-                          ? "1px solid #f3f4f6"
+                          ? "1px solid rgb(245, 245, 245)"
                           : "none",
                       animationDelay: `${idx * 45}ms`,
                     }}

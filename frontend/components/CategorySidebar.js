@@ -4,10 +4,13 @@ import API_BASE from "../lib/api";
 
 // Skeleton loader for sidebar
 const SidebarSkeleton = () => (
-  <div className="hidden md:flex md:w-48 flex-col border-r border-gray-200 sticky top-20 max-h-[calc(100vh-80px)] overflow-y-auto bg-white">
+  <div className="hidden md:flex md:w-48 flex-col border-r border-neutral-200 sticky top-20 max-h-[calc(100vh-80px)] overflow-y-auto bg-white">
     {[...Array(8)].map((_, i) => (
-      <div key={i} className="px-5 py-3 border-b border-gray-100">
-        <div className="h-4 bg-gray-200 rounded animate-pulse"></div>
+      <div
+        key={i}
+        className="px-5 py-3 border-b border-neutral-100"
+      >
+        <div className="h-4 bg-neutral-200 rounded animate-pulse"></div>
       </div>
     ))}
   </div>
@@ -51,7 +54,7 @@ const MegaMenu = ({ category, isOpen, onClose }) => {
   return (
     <div
       ref={menuRef}
-      className="absolute left-full top-0 ml-0 bg-white border border-gray-200 shadow-xl rounded-md min-w-max z-40 overflow-hidden"
+      className="absolute left-full top-0 ml-0 bg-white border border-neutral-200/60 shadow-xs rounded-sm min-w-max z-40 overflow-hidden"
       role="menu"
       aria-label={`${category.name} submenu`}
     >
@@ -64,7 +67,7 @@ const MegaMenu = ({ category, isOpen, onClose }) => {
             legacyBehavior
           >
             <a
-              className="flex items-center gap-3 px-6 py-3 text-sm text-gray-700 hover:bg-orange-50 hover:text-orange-600 transition-colors focus:outline-none focus:bg-orange-50"
+              className="flex items-center gap-3 px-6 py-3.5 text-sm text-neutral-700 hover:bg-neutral-50 hover:text-brand transition-colors focus:outline-none focus:bg-neutral-50"
               role="menuitem"
             >
               {item.icon && (
@@ -170,10 +173,10 @@ export default function CategorySidebar({ isLoading = false }) {
           aria-label="Toggle categories menu"
           aria-expanded={mobileOpen}
           aria-controls="mobile-categories-menu"
-          className="p-3 bg-white border rounded-r-lg shadow-md hover:bg-gray-50 transition-colors"
+          className="p-3 bg-white border rounded-r-sm shadow-xs hover:bg-neutral-50 transition-colors"
         >
           <svg
-            className="w-5 h-5 text-gray-700"
+            className="w-5 h-5 text-neutral-700"
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
@@ -202,12 +205,14 @@ export default function CategorySidebar({ isLoading = false }) {
             role="navigation"
             aria-label="Categories"
           >
-            <div className="px-5 py-4 border-b flex items-center justify-between">
-              <h2 className="font-semibold text-gray-900">Categories</h2>
+            <div className="px-5 py-4 border-b border-neutral-200/60 flex items-center justify-between">
+              <h2 className="font-semibold text-neutral-900">
+                Categories
+              </h2>
               <button
                 onClick={() => setMobileOpen(false)}
                 aria-label="Close menu"
-                className="text-gray-600 hover:text-gray-900"
+                className="text-neutral-600 hover:text-neutral-900"
               >
                 <svg
                   className="w-6 h-6"
@@ -229,7 +234,7 @@ export default function CategorySidebar({ isLoading = false }) {
                 <li key={cat.id}>
                   <Link href={`/categories/${cat.slug}`} legacyBehavior>
                     <a
-                      className="block px-5 py-3 text-gray-700 hover:bg-orange-50 hover:text-orange-600 transition-colors"
+                      className="block px-5 py-3.5 text-neutral-700 hover:bg-neutral-50 hover:text-brand transition-colors"
                       onClick={() => setMobileOpen(false)}
                     >
                       {cat.icon && <span className="mr-2">{cat.icon}</span>}
@@ -237,12 +242,12 @@ export default function CategorySidebar({ isLoading = false }) {
                     </a>
                   </Link>
                   {cat.megaMenuItems?.length > 0 && (
-                    <ul className="bg-gray-50 border-l-2 border-orange-500">
+                    <ul className="bg-neutral-50 border-l-2 border-brand">
                       {cat.megaMenuItems.map((item, idx) => (
                         <li key={idx}>
                           <Link href={item.link || "#"} legacyBehavior>
                             <a
-                              className="block px-8 py-2 text-sm text-gray-600 hover:text-orange-600 transition-colors"
+                              className="block px-8 py-2 text-sm text-neutral-600 hover:text-brand transition-colors"
                               onClick={() => setMobileOpen(false)}
                             >
                               {item.title}
@@ -261,21 +266,21 @@ export default function CategorySidebar({ isLoading = false }) {
 
       {/* Desktop Sidebar */}
       <aside
-        className="hidden md:flex md:w-48 flex-col border-r border-gray-200 sticky top-20 max-h-[calc(100vh-80px)] overflow-y-auto bg-white shadow-sm"
+        className="hidden md:flex md:w-48 flex-col border-r border-neutral-200/60 sticky top-20 max-h-[calc(100vh-80px)] overflow-y-auto bg-white shadow-xs"
         role="navigation"
         aria-label="Product categories"
       >
         {categories.length === 0 ? (
-          <div className="p-5 text-center text-gray-500 text-sm">
+          <div className="p-5 text-center text-neutral-500 text-sm">
             {error ? `Error: ${error}` : "No categories available"}
           </div>
         ) : (
-          <ul className="divide-y divide-gray-100">
+          <ul className="divide-y divide-neutral-100/50">
             {categories.map((category) => (
               <li key={category.id} className="relative group">
                 <Link href={`/categories/${category.slug}`} legacyBehavior>
                   <a
-                    className="flex items-center justify-between px-5 py-3.5 text-sm font-medium text-gray-700 hover:bg-orange-50 hover:text-orange-600 transition-colors focus:outline-none focus:bg-orange-50"
+                    className="flex items-center justify-between px-5 py-4 text-sm font-medium text-neutral-700 hover:bg-neutral-50 hover:text-brand transition-colors focus:outline-none focus:bg-neutral-50"
                     onMouseEnter={() =>
                       category.megaMenuItems?.length > 0 &&
                       setOpenMenu(category.id)
@@ -290,21 +295,6 @@ export default function CategorySidebar({ isLoading = false }) {
                       )}
                       <span>{category.name}</span>
                     </div>
-                    {category.megaMenuItems?.length > 0 && (
-                      <svg
-                        className="w-4 h-4 opacity-50 group-hover:opacity-100 transition-opacity"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M9 5l7 7-7 7"
-                        />
-                      </svg>
-                    )}
                   </a>
                 </Link>
 

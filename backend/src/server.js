@@ -1,31 +1,72 @@
+// load environment variables in two steps: first .env then .env.local
+// This mirrors Next.js behavior and allows developers to override values
+// without modifying the committed `.env` file.  `.env.local` is gitignored.
 require("dotenv").config();
+// override with .env.local if present
+require("dotenv").config({ path: ".env.local", override: true });
+
+const config = require("./config");
+
+// basic required environment variable validation
+if (!config.JWT_SECRET || !config.DATABASE_URL) {
+  console.error("ERROR: missing required JWT_SECRET or DATABASE_URL");
+  process.exit(1);
+}
+
 const express = require("express");
 const cors = require("cors");
 const compression = require("compression");
+const cookieParser = require("cookie-parser");
 const path = require("path");
+const fs = require("fs");
 const logger = require("./middleware/logger");
 const { rateLimit } = require("./middleware/rateLimit");
 const { validateContentType } = require("./middleware/validation");
+const prisma = require("./db");
+const bcrypt = require("bcrypt");
 
 const app = express();
-const port = parseInt(process.env.PORT || "4000", 10);
+const port = config.PORT;
+const NODE_ENV = config.NODE_ENV;
+const ALLOWED_ORIGINS = config.ALLOWED_ORIGINS;
 
-const NODE_ENV = process.env.NODE_ENV || "development";
-const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || "http://localhost:3000")
-  .split(",")
-  .map((origin) => origin.trim());
+// In production, trust proxy headers (for HTTPS enforcement)
+if (NODE_ENV === "production") {
+  app.enable("trust proxy");
+}
 
-const RATE_LIMIT_WINDOW_MS = parseInt(
-  process.env.RATE_LIMIT_WINDOW_MS || "900000",
-  10,
-);
-const RATE_LIMIT_MAX_REQUESTS = parseInt(
-  process.env.RATE_LIMIT_MAX_REQUESTS || "100",
-  10,
-);
+// Parse cookies for refresh token flow
+app.use(cookieParser());
+
+const RATE_LIMIT_WINDOW_MS = config.RATE_LIMIT_WINDOW_MS;
+const RATE_LIMIT_MAX_REQUESTS = config.RATE_LIMIT_MAX_REQUESTS;
 
 // Request logging
 app.use(logger.request);
+
+// HTTPS enforcement (Production only, robust)
+if (config.NODE_ENV === "production") {
+  app.use((req, res, next) => {
+    // If not secure, redirect to HTTPS
+    const isSecure = req.secure || req.get("X-Forwarded-Proto") === "https";
+    if (!isSecure) {
+      // If GET or HEAD, redirect. Otherwise, reject (to avoid unsafe redirects for POST, etc.)
+      if (req.method === "GET" || req.method === "HEAD") {
+        const redirectUrl = "https://" + req.get("host") + req.originalUrl;
+        return res.redirect(301, redirectUrl);
+      } else {
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: "INSECURE_REQUEST",
+            message: "HTTPS required in production.",
+          },
+        });
+      }
+    }
+    next();
+  });
+}
 
 // Enable gzip compression for responses
 app.use(compression());
@@ -34,15 +75,21 @@ app.use(compression());
 app.use(
   cors({
     origin: (origin, callback) => {
+      // log origin for debugging CORS issues
+      logger.info("CORS origin check", { origin });
       if (!origin || ALLOWED_ORIGINS.includes(origin)) {
-        callback(null, true);
-      } else {
-        callback(new Error("Not allowed by CORS"));
+        return callback(null, true);
       }
+      callback(new Error("Not allowed by CORS"));
     },
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
+    allowedHeaders: [
+      "Content-Type",
+      "Authorization",
+      "x-requested-with",
+      "x-upload-key",
+    ],
     exposedHeaders: [
       "X-RateLimit-Limit",
       "X-RateLimit-Remaining",
@@ -58,7 +105,7 @@ app.use((req, res, next) => {
   res.setHeader("X-Frame-Options", "SAMEORIGIN");
   res.setHeader("X-XSS-Protection", "1; mode=block");
 
-  // HTTPS enforcement in production
+  // HSTS header in production (enforce HTTPS for 1 year)
   if (NODE_ENV === "production") {
     res.setHeader(
       "Strict-Transport-Security",
@@ -102,25 +149,45 @@ app.use(express.urlencoded({ limit: "10mb", extended: true }));
 // Static file serving with cache control
 app.use(
   "/uploads",
-  express.static(path.join(__dirname, "..", "..", "uploads"), {
+  express.static(path.join(__dirname, "..", "uploads"), {
     maxAge: "1d",
     etag: false,
   }),
 );
 
+// Fallback explicit route to serve uploaded files. This ensures files written
+// to the backend uploads directory are returned even if the static middleware
+// misses them for any reason (helps during local dev on Windows/paths).
+app.get("/uploads/*", (req, res, next) => {
+  try {
+    const relPath = req.path.replace(/^\/+/, ""); // e.g. "uploads/filename"
+    const filePath = path.join(__dirname, "..", relPath);
+    if (fs.existsSync(filePath)) {
+      return res.sendFile(filePath);
+    }
+    return next();
+  } catch (err) {
+    // let the global error handler/logging handle unexpected issues
+    return next(err);
+  }
+});
+
 // Routes with error handling
 const authRoutes = require("./routes/auth");
 const sneakerRoutes = require("./routes/sneakers");
 const orderRoutes = require("./routes/orders");
+const paymentsRoutes = require("./routes/payments");
 const adminRoutes = require("./routes/admin");
 const s3Routes = require("./routes/s3");
 const bannerRoutes = require("./routes/banners");
 const categoryRoutes = require("./routes/categories");
 const brandRoutes = require("./routes/brands");
 
+// register routes (logger used elsewhere for request tracking)
 app.use("/api/auth", authRoutes);
 app.use("/api/sneakers", sneakerRoutes);
 app.use("/api/orders", orderRoutes);
+app.use("/api/payments", paymentsRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/s3", s3Routes);
 app.use("/api/banners", bannerRoutes);
@@ -138,15 +205,16 @@ app.get("/api/health", (req, res) => {
 });
 
 // Readiness check for Kubernetes/container orchestration
-app.get("/ready", async (req, res) => {
+const readinessHandler = async (req, res) => {
   try {
-    const prisma = require("./db");
     await prisma.$queryRaw`SELECT 1`;
     res.json({ ready: true });
   } catch (err) {
     res.status(503).json({ ready: false, error: err.message });
   }
-});
+};
+app.get("/ready", readinessHandler);
+app.get("/api/ready", readinessHandler);
 
 // 404 handler
 app.use((req, res) => {
@@ -181,24 +249,106 @@ app.use((err, req, res, next) => {
   });
 });
 
-// Start server
-const server = app.listen(port, "0.0.0.0", () => {
-  logger.info("Backend server started", {
-    port,
-    environment: NODE_ENV,
-    allowedOrigins: ALLOWED_ORIGINS.join(", "),
-  });
-});
+// Ensure a default admin user exists in non-production environments so that
+// automated tests and local admin flows can authenticate reliably.
+const ensureDevAdmin = async () => {
+  if (NODE_ENV === "production") return;
 
-// Handle server errors
-server.on("error", (err) => {
-  if (err.code === "EADDRINUSE") {
-    logger.error("Port already in use", { port });
-  } else {
-    logger.error("Server error", { message: err.message });
+  try {
+    const email = (process.env.ADMIN_EMAIL || "admin@example.com")
+      .toLowerCase()
+      .trim();
+    let password = process.env.ADMIN_PASSWORD;
+
+    if (!password) {
+      // Instead of failing when the variable is missing, log a warning and
+      // generate a temporary password so the server can start in CI or local
+      // environments that don't set it explicitly. This keeps the tests
+      // working without needing manual env configuration.
+      logger.warn(
+        "ADMIN_PASSWORD not set; creating dev admin with random password",
+      );
+      password = Math.random().toString(36).slice(-8);
+    }
+
+    let user = await prisma.user.findUnique({ where: { email } });
+
+    if (!user) {
+      const hash = await bcrypt.hash(password, 10);
+      user = await prisma.user.create({
+        data: {
+          email,
+          password: hash,
+          name: "Admin",
+          isAdmin: true,
+        },
+      });
+      logger.info("Dev admin user created", { email: user.email, id: user.id });
+    } else if (!user.isAdmin) {
+      user = await prisma.user.update({
+        where: { email },
+        data: { isAdmin: true },
+      });
+      logger.info("Existing user elevated to admin", {
+        email: user.email,
+        id: user.id,
+      });
+    }
+  } catch (err) {
+    logger.error("Failed to ensure dev admin user", { message: err.message });
+    throw err;
   }
-  process.exit(1);
-});
+};
+
+// Start server with pre-flight checks
+const startServer = async () => {
+  try {
+    // verify database connection before binding
+    await prisma.$queryRaw`SELECT 1`;
+    logger.info("Database connection successful");
+
+    // In non-production, ensure a default admin user exists for tests and
+    // local admin access.
+    await ensureDevAdmin();
+
+    if (NODE_ENV !== "production") {
+      try {
+        const seed = require("../scripts/seed");
+        if (typeof seed.main === "function") {
+          await seed.main();
+        }
+      } catch (err) {
+        logger.warn("Failed to execute full seed script", {
+          message: err.message,
+        });
+      }
+    }
+  } catch (err) {
+    logger.error("Database connection failed", { message: err.message });
+    // exit early if the DB is not reachable
+    process.exit(1);
+  }
+
+  const server = app.listen(port, "0.0.0.0", () => {
+    logger.info("Backend server started", {
+      port,
+      environment: NODE_ENV,
+      allowedOrigins: ALLOWED_ORIGINS.join(", "),
+    });
+  });
+
+  // Handle server errors
+  server.on("error", (err) => {
+    if (err.code === "EADDRINUSE") {
+      logger.error("Port already in use", { port });
+    } else {
+      logger.error("Server error", { message: err.message });
+    }
+    process.exit(1);
+  });
+};
+
+startServer();
 
 // Graceful shutdown
 const gracefulShutdown = async () => {

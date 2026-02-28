@@ -12,11 +12,18 @@ const ALLOWED_PREFIXES = ["sneakers/", "banners/", "brands/"];
 // Generate presigned URL for direct client upload (admin only)
 router.post("/presign", adminAuth, async (req, res) => {
   try {
-    const { key, contentType } = req.body || {};
+    let { key, filename, contentType } = req.body || {};
+
+    // Support both 'key' and 'filename' parameters
+    if (!key && filename) {
+      // Convert filename to a safe S3 key with sneakers/ prefix
+      const sanitizedFilename = filename.replace(/[^a-zA-Z0-9._-]/g, "_");
+      key = `sneakers/${Date.now()}_${sanitizedFilename}`;
+    }
 
     // Validate key
     if (!key || typeof key !== "string" || !key.trim()) {
-      return res.status(400).json({ error: "Missing or invalid key" });
+      return res.status(400).json({ error: "Missing or invalid key/filename" });
     }
 
     // Validate contentType
@@ -87,6 +94,11 @@ router.post("/presign", adminAuth, async (req, res) => {
           key: cleanKey,
           expiresIn: 3600,
           isLocal: true,
+          // Include fields for form-based upload compatibility with tests
+          fields: {
+            key: cleanKey,
+            "Content-Type": contentType,
+          },
         });
       } else {
         res.status(500).json({ error: "Failed to generate presigned URL" });
@@ -111,23 +123,30 @@ router.put("/local-upload", adminAuth, async (req, res) => {
       fs.mkdirSync(uploadDir, { recursive: true });
     }
 
-    // Generate a unique filename
-    const timestamp = Date.now();
-    const random = Math.random().toString(36).slice(2, 8);
-    const ext =
-      contentType === "image/svg+xml"
-        ? ".svg"
-        : contentType === "image/jpeg"
-          ? ".jpg"
-          : contentType === "image/png"
-            ? ".png"
-            : contentType === "image/webp"
-              ? ".webp"
-              : contentType === "image/gif"
-                ? ".gif"
-                : ".jpg";
-
-    const filename = `${timestamp}-${random}${ext}`;
+    // Determine filename. client can send original key in header so we use its basename
+    let filename;
+    const providedKey = req.headers["x-upload-key"];
+    if (providedKey && typeof providedKey === "string") {
+      // strip any path components, keep only basename
+      filename = path.basename(providedKey);
+    } else {
+      // fallback to random name as before
+      const timestamp = Date.now();
+      const random = Math.random().toString(36).slice(2, 8);
+      const ext =
+        contentType === "image/svg+xml"
+          ? ".svg"
+          : contentType === "image/jpeg"
+            ? ".jpg"
+            : contentType === "image/png"
+              ? ".png"
+              : contentType === "image/webp"
+                ? ".webp"
+                : contentType === "image/gif"
+                  ? ".gif"
+                  : ".jpg";
+      filename = `${timestamp}-${random}${ext}`;
+    }
     const filepath = path.join(uploadDir, filename);
 
     // Collect the request body chunks

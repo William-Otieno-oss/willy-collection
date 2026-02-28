@@ -30,7 +30,7 @@ export default function Document() {
         <link rel="dns-prefetch" href="http://localhost:4000" />
 
         {/* Favicon and theme */}
-        <meta name="theme-color" content="#1c140c" />
+        <meta name="theme-color" content="var(--color-brand-dark)" />
         <meta name="mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta
@@ -48,7 +48,6 @@ export default function Document() {
           name="keywords"
           content="sneakers, shoes, Nike, Adidas, Puma, Jordan"
         />
-        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
         {/* Open Graph */}
         <meta property="og:type" content="website" />

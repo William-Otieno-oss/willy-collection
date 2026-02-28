@@ -7,13 +7,22 @@ const { memoryUpload } = require("../utils/upload");
 const slugify = require("slugify");
 const fs = require("fs");
 const path = require("path");
-const fileType = require("file-type");
+// file-type is an ESM module, handle it with dynamic import when needed
+let fileTypeModule = null;
+async function getFileType() {
+  if (!fileTypeModule) {
+    fileTypeModule = await import("file-type");
+  }
+  return fileTypeModule;
+}
 const { computeChecksum, scanBuffer } = require("../services/scanner");
 const {
   uploadBufferToS3,
   deleteObject,
   headObject,
   getObjectBuffer,
+  isConfigured,
+  getPublicUrl,
 } = require("../services/storage");
 
 // ============ VALIDATION HELPERS ============
@@ -112,30 +121,143 @@ router.get("/", async (req, res) => {
     const limit = Math.min(parseInt(req.query.limit) || 50, 500);
     const offset = Math.max(parseInt(req.query.offset) || 0, 0);
 
-    const sneakers = await prisma.sneaker.findMany({
+    // build dynamic filters based on query params
+    const where = {};
+    // accept `brand` (id or slug) or `brandId` in querystring for convenience
+    const brandParam = req.query.brand || req.query.brandId;
+    if (brandParam) {
+      const asInt = parseInt(brandParam, 10);
+      if (!isNaN(asInt)) {
+        where.brandId = asInt;
+      } else {
+        // treat nondigits as slug (or name) and rely on relation filter
+        where.brand = {
+          slug: brandParam.toString().toLowerCase(),
+        };
+      }
+    }
+    // we intentionally do NOT filter categories at the database layer; the
+    // previous substring-based approach caused Men/Women collision.  we'll
+    // perform strict, case-insensitive matching below in JavaScript.
+    // Note: Prisma PostgreSQL does not support mode: "insensitive" on contains
+    // Must filter results in application layer
+    const allSneakers = await prisma.sneaker.findMany({
+      where: {
+        ...(req.query.brand || req.query.category ? where : {}),
+      },
       include: {
         images: {
           select: { id: true, url: true, order: true, filename: true },
         },
-        stocks: true,
+        stocks: {
+          include: {
+            size: true,
+          },
+        },
         brand: true,
       },
-      take: limit,
-      skip: offset,
       orderBy: { createdAt: "desc" },
     });
 
-    const total = await prisma.sneaker.count();
+    // Apply search and category filters in-memory if provided
+    let filtered = allSneakers;
+    const term =
+      req.query.search && typeof req.query.search === "string"
+        ? req.query.search.trim().toLowerCase()
+        : null;
+    let catFilterLower =
+      req.query.category && typeof req.query.category === "string"
+        ? req.query.category.toString().trim().toLowerCase()
+        : null;
 
-    res.json({
-      data: sneakers,
-      total,
-      limit,
-      offset,
+    // if the client passed a slug rather than the human-readable name
+    // attempt to look it up and convert to the stored category name
+    if (catFilterLower) {
+      try {
+        const foundCat = await prisma.category.findFirst({
+          where: {
+            slug: catFilterLower,
+          },
+        });
+        if (foundCat && foundCat.name) {
+          catFilterLower = foundCat.name.toLowerCase();
+        }
+      } catch (e) {
+        /* ignore lookup failure, we'll just use the original string */
+      }
+    }
+
+    if (term || catFilterLower) {
+      filtered = allSneakers.filter((s) => {
+        let match = false;
+        if (term) {
+          if (s.modelName && s.modelName.toLowerCase().includes(term))
+            match = true;
+          if (
+            !match &&
+            s.description &&
+            s.description.toLowerCase().includes(term)
+          )
+            match = true;
+          if (
+            !match &&
+            s.brand &&
+            typeof s.brand === "object" &&
+            s.brand.name &&
+            s.brand.name.toLowerCase().includes(term)
+          ) {
+            match = true;
+          }
+        }
+        if (catFilterLower) {
+          try {
+            const catsArr = JSON.parse(s.categories || "[]");
+            if (Array.isArray(catsArr)) {
+              if (
+                catsArr.some((c) => String(c).toLowerCase() === catFilterLower)
+              ) {
+                match = true;
+              }
+            }
+          } catch {
+            // fallback to substring if JSON parse fails
+            const cats = (s.categories || "").toLowerCase();
+            if (cats.includes(catFilterLower)) {
+              match = true;
+            }
+          }
+        }
+        return match;
+      });
+    }
+
+    // Apply pagination to filtered results
+    const paginated = filtered.slice(offset, offset + limit);
+
+    // convert any relative image URLs to absolute using request info
+    const baseUrl = `${req.protocol}://${req.get("host")}`;
+    const resultsWithFullUrls = paginated.map((s) => {
+      if (s.images && Array.isArray(s.images)) {
+        s.images = s.images.map((img) => {
+          if (img.url && !/^https?:\/\//i.test(img.url)) {
+            return { ...img, url: baseUrl + img.url };
+          }
+          return img;
+        });
+      }
+      return s;
     });
+
+    // For public API consumers (including the storefront and automated tests),
+    // return a simple array of sneakers. Metadata like total/offset can be
+    // derived via separate endpoints when needed.
+    res.json(resultsWithFullUrls);
   } catch (err) {
     logger.error("Error fetching sneakers", { message: err.message });
-    res.status(500).json({ error: "Failed to fetch sneakers" });
+    res.status(500).json({
+      success: false,
+      error: { code: "INTERNAL_ERROR", message: "Failed to fetch sneakers" },
+    });
   }
 });
 
@@ -145,28 +267,78 @@ router.get("/:slug", async (req, res) => {
     const { slug } = req.params;
 
     if (!slug || typeof slug !== "string") {
-      return res.status(400).json({ error: "Invalid slug provided" });
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: "VALIDATION_FAILED",
+          message: "Invalid slug provided",
+        },
+      });
     }
 
-    const sneaker = await prisma.sneaker.findUnique({
-      where: { slug: slug.toLowerCase().trim() },
-      include: {
-        images: {
-          orderBy: { order: "asc" },
+    // support both slug and numeric id here.  Admin UI passes numeric ids when
+    // editing, so treat purely-digits input as an ID lookup.  Normal clients send
+    // human-readable slugs.
+    let sneaker;
+    if (/^\d+$/.test(slug.trim())) {
+      // numeric string, lookup by id
+      const id = parseInt(slug, 10);
+      sneaker = await prisma.sneaker.findUnique({
+        where: { id },
+        include: {
+          images: {
+            orderBy: { order: "asc" },
+          },
+          stocks: {
+            include: {
+              size: true,
+            },
+          },
+          brand: true,
         },
-        stocks: true,
-        brand: true,
-      },
-    });
+      });
+    } else {
+      sneaker = await prisma.sneaker.findUnique({
+        where: { slug: slug.toLowerCase().trim() },
+        include: {
+          images: {
+            orderBy: { order: "asc" },
+          },
+          stocks: {
+            include: {
+              size: true,
+            },
+          },
+          brand: true,
+        },
+      });
+    }
 
     if (!sneaker) {
-      return res.status(404).json({ error: "Sneaker not found" });
+      return res.status(404).json({
+        success: false,
+        error: { code: "NOT_FOUND", message: "Sneaker not found" },
+      });
+    }
+
+    // ensure image URLs are absolute so clients don't need to guess the base
+    const baseUrl = `${req.protocol}://${req.get("host")}`;
+    if (sneaker.images && Array.isArray(sneaker.images)) {
+      sneaker.images = sneaker.images.map((img) => {
+        if (img.url && !/^https?:\/\//i.test(img.url)) {
+          return { ...img, url: baseUrl + img.url };
+        }
+        return img;
+      });
     }
 
     res.json(sneaker);
   } catch (err) {
     logger.error("Error fetching sneaker", { message: err.message });
-    res.status(500).json({ error: "Failed to fetch sneaker" });
+    res.status(500).json({
+      success: false,
+      error: { code: "INTERNAL_ERROR", message: "Failed to fetch sneaker" },
+    });
   }
 });
 
@@ -180,12 +352,18 @@ router.post("/", adminAuth, async (req, res) => {
     // Validate required fields
     const modelValidation = validateModelName(data.modelName);
     if (!modelValidation.valid) {
-      return res.status(400).json({ error: modelValidation.error });
+      return res.status(400).json({
+        success: false,
+        error: { code: "VALIDATION_FAILED", message: modelValidation.error },
+      });
     }
 
     const priceValidation = validatePrice(data.price);
     if (!priceValidation.valid) {
-      return res.status(400).json({ error: priceValidation.error });
+      return res.status(400).json({
+        success: false,
+        error: { code: "VALIDATION_FAILED", message: priceValidation.error },
+      });
     }
 
     // Brand resolution and validation
@@ -193,7 +371,13 @@ router.post("/", adminAuth, async (req, res) => {
     if (data.brandId) {
       const brandValidation = validateBrandId(data.brandId);
       if (!brandValidation.valid) {
-        return res.status(400).json({ error: brandValidation.error });
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: "VALIDATION_FAILED",
+            message: brandValidation.error,
+          },
+        });
       }
       brandId = brandValidation.value;
     } else if (data.brand) {
@@ -201,7 +385,7 @@ router.post("/", adminAuth, async (req, res) => {
         where: {
           OR: [
             {
-              name: { equals: String(data.brand).trim(), mode: "insensitive" },
+              name: String(data.brand).trim(),
             },
             { slug: String(data.brand).toLowerCase().trim() },
           ],
@@ -211,15 +395,25 @@ router.post("/", adminAuth, async (req, res) => {
     }
 
     if (!brandId) {
-      return res
-        .status(400)
-        .json({ error: "Brand is required and must be valid" });
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: "VALIDATION_FAILED",
+          message: "Brand is required and must be valid",
+        },
+      });
     }
 
     // Verify brand exists
     const brandRec = await prisma.brand.findUnique({ where: { id: brandId } });
     if (!brandRec) {
-      return res.status(404).json({ error: "Specified brand does not exist" });
+      return res.status(404).json({
+        success: false,
+        error: {
+          code: "NOT_FOUND",
+          message: "Specified brand does not exist",
+        },
+      });
     }
 
     // Generate slug
@@ -248,21 +442,46 @@ router.post("/", adminAuth, async (req, res) => {
     res.status(201).json(sneaker);
   } catch (err) {
     logger.error("Error creating sneaker", { message: err.message });
-    res.status(500).json({ error: "Failed to create sneaker" });
+    res.status(500).json({
+      success: false,
+      error: { code: "INTERNAL_ERROR", message: "Failed to create sneaker" },
+    });
   }
 });
 
 // Update sneaker (admin only)
+// multer might throw errors (file too large, invalid mime), intercept them so we respond cleanly
 router.put(
   "/:id",
   adminAuth,
-  memoryUpload.array("images", 16),
+  (req, res, next) => {
+    memoryUpload.array("images", 16)(req, res, (err) => {
+      if (err) {
+        logger.warn("Multer upload error", { error: err.message });
+        // multer errors have code property
+        if (err.code === "LIMIT_FILE_SIZE") {
+          return res.status(413).json({
+            success: false,
+            error: { code: "PAYLOAD_TOO_LARGE", message: "File too large" },
+          });
+        }
+        return res.status(400).json({
+          success: false,
+          error: { code: "UPLOAD_ERROR", message: err.message },
+        });
+      }
+      next();
+    });
+  },
   async (req, res) => {
     try {
       const id = parseInt(req.params.id);
 
       if (isNaN(id) || id <= 0) {
-        return res.status(400).json({ error: "Invalid sneaker ID" });
+        return res.status(400).json({
+          success: false,
+          error: { code: "VALIDATION_FAILED", message: "Invalid sneaker ID" },
+        });
       }
 
       // Verify sneaker exists
@@ -270,155 +489,197 @@ router.put(
         where: { id },
       });
       if (!existingSneaker) {
-        return res.status(404).json({ error: "Sneaker not found" });
+        return res.status(404).json({
+          success: false,
+          error: { code: "NOT_FOUND", message: "Sneaker not found" },
+        });
       }
 
       const data = req.body;
       const update = {};
 
-      // Update fields with validation
+      // Validate and collect fields
       if (data.modelName !== undefined) {
         const validation = validateModelName(data.modelName);
         if (!validation.valid) {
-          return res.status(400).json({ error: validation.error });
+          return res.status(400).json({
+            success: false,
+            error: { code: "VALIDATION_FAILED", message: validation.error },
+          });
         }
         update.modelName = validation.value;
       }
-
       if (data.price !== undefined) {
         const validation = validatePrice(data.price);
         if (!validation.valid) {
-          return res.status(400).json({ error: validation.error });
+          return res.status(400).json({
+            success: false,
+            error: { code: "VALIDATION_FAILED", message: validation.error },
+          });
         }
         update.price = validation.value;
       }
-
       if (data.brandId !== undefined) {
         const validation = validateBrandId(data.brandId);
         if (!validation.valid) {
-          return res.status(400).json({ error: validation.error });
+          return res.status(400).json({
+            success: false,
+            error: { code: "VALIDATION_FAILED", message: validation.error },
+          });
         }
         const brand = await prisma.brand.findUnique({
           where: { id: validation.value },
         });
         if (!brand) {
-          return res
-            .status(404)
-            .json({ error: "Specified brand does not exist" });
+          return res.status(404).json({
+            success: false,
+            error: {
+              code: "NOT_FOUND",
+              message: "Specified brand does not exist",
+            },
+          });
         }
         update.brandId = validation.value;
       }
-
       if (data.description !== undefined) {
         update.description = validateDescription(data.description);
       }
-
       if (data.categories !== undefined) {
         update.categories = JSON.stringify(validateCategories(data.categories));
       }
-
       if (data.colors !== undefined) {
         update.colors = JSON.stringify(validateColors(data.colors));
       }
-
       if (data.featured !== undefined) {
         update.featured = data.featured === "true" || data.featured === true;
       }
-
       if (data.inStock !== undefined) {
         update.inStock = data.inStock === "true" || data.inStock === true;
       }
 
-      // Update sneaker
-      const sneaker = await prisma.sneaker.update({
-        where: { id },
-        data: update,
-      });
-
-      // Handle image uploads if files provided
+      // Process any uploaded files first
       const files = req.files || [];
+      const inserts = [];
+      const s3Configured = isConfigured();
+
       for (const f of files) {
-        try {
-          // Validate file type
-          const ft = await fileType.fromBuffer(f.buffer);
-          if (!ft || !ft.mime.startsWith("image/")) {
-            logger.warn(`Skipping non-image file: ${f.originalname}`);
-            continue;
-          }
+        logger.info("Received file upload", {
+          sneakerId: existingSneaker.id,
+          name: f.originalname,
+          size: f.size,
+        });
 
-          // Check file size (max 10MB)
-          if (f.buffer.length > 10 * 1024 * 1024) {
-            logger.warn(`Skipping oversized file: ${f.originalname}`);
-            continue;
-          }
+        if (!f || !f.buffer || !Buffer.isBuffer(f.buffer)) {
+          logger.warn("Upload missing buffer, skipping file", {
+            name: f && f.originalname,
+          });
+          continue;
+        }
 
-          const checksum = await computeChecksum(f.buffer);
-          const sanitizedName = String(f.originalname)
-            .replace(/[^a-zA-Z0-9.\-_]/g, "_")
-            .substring(0, 100);
-          const filename =
-            slugify(path.basename(sanitizedName, path.extname(sanitizedName))) +
-            "-" +
-            Date.now() +
-            path.extname(sanitizedName);
+        const ftMod = await getFileType();
+        const ft = await ftMod.fileTypeFromBuffer(f.buffer);
+        if (!ft || !ft.mime.startsWith("image/")) {
+          logger.warn("Skipping non-image upload", { name: f.originalname });
+          continue;
+        }
+        if (f.buffer.length > 10 * 1024 * 1024) {
+          logger.warn("Skipping oversized upload", { name: f.originalname });
+          continue;
+        }
 
-          let url = `/uploads/${sanitizedName}`;
-          let s3Key = undefined;
+        const checksum = await computeChecksum(f.buffer);
+        const sanitizedName = String(f.originalname)
+          .replace(/[^a-zA-Z0-9.\-_]/g, "_")
+          .substring(0, 100);
+        const filename =
+          slugify(path.basename(sanitizedName, path.extname(sanitizedName))) +
+          "-" +
+          Date.now() +
+          path.extname(sanitizedName);
+        let url = `/uploads/${sanitizedName}`;
+        let s3Key;
 
+        if (s3Configured) {
           try {
-            const key = `sneakers/${sneaker.id}/${filename}`;
-            await uploadBufferToS3(f.buffer, key, ft.mime);
-            s3Key = key;
-
-            // Construct correct image URL
-            if (process.env.AWS_S3_ENDPOINT) {
-              const endpoint = process.env.AWS_S3_ENDPOINT.replace(/\/$/, "");
-              url = `${endpoint}/${process.env.AWS_S3_BUCKET}/${key}`;
-            } else {
-              url = `https://${process.env.AWS_S3_BUCKET}.s3.${process.env.AWS_REGION || "us-east-1"}.amazonaws.com/${key}`;
-            }
+            const key = `sneakers/${existingSneaker.id}/${filename}`;
+            logger.info("Uploading buffer to S3", { key });
+            const uploadRes = await uploadBufferToS3(f.buffer, key, ft.mime);
+            s3Key = uploadRes.key;
+            url = uploadRes.url || getPublicUrl(uploadRes.key);
+            logger.info("S3 upload succeeded", { url });
           } catch (uploadErr) {
-            logger.warn("S3 upload failed, using local fallback", {
+            logger.error("Upload to storage failed", {
+              message: uploadErr.message,
+              file: f.originalname,
+            });
+            return res.status(502).json({
+              error: "Upload to storage failed",
               message: uploadErr.message,
             });
+          }
+        } else {
+          // Local fallback when S3 is not configured
+          try {
             const localName = `${Date.now()}-${Math.random()
               .toString(36)
               .slice(2)}${path.extname(sanitizedName)}`;
             const dest = path.join(__dirname, "..", "..", "uploads", localName);
             fs.writeFileSync(dest, f.buffer);
             url = `/uploads/${localName}`;
+            logger.info("Buffered file written to disk", { dest, url });
+          } catch (diskErr) {
+            logger.error("Failed to write upload to disk", {
+              message: diskErr.message,
+            });
+            return res.status(500).json({
+              success: false,
+              error: {
+                code: "INTERNAL_ERROR",
+                message: "Failed to store uploaded file",
+              },
+            });
           }
-
-          // Scan file for security
-          const scan = await scanBuffer(f.buffer, filename);
-
-          // Create image record
-          await prisma.sneakerImage.create({
-            data: {
-              url,
-              filename: sanitizedName,
-              s3Key,
-              checksum,
-              scanStatus: scan.status,
-              sneakerId: sneaker.id,
-            },
-          });
-        } catch (fileErr) {
-          logger.error(`Failed to process file: ${f.originalname}`, {
-            error: fileErr.message,
-          });
         }
+
+        const scan = await scanBuffer(f.buffer, filename);
+        inserts.push({
+          url,
+          filename: sanitizedName,
+          s3Key,
+          checksum,
+          scanStatus: scan.status,
+          sneakerId: existingSneaker.id,
+        });
       }
 
-      const updated = await prisma.sneaker.findUnique({
-        where: { id },
+      // perform database updates inside transaction to keep data consistent
+      const updated = await prisma.$transaction(async (tx) => {
+        const u = await tx.sneaker.update({
+          where: { id: existingSneaker.id },
+          data: update,
+        });
+        for (const img of inserts) {
+          await tx.sneakerImage.create({ data: img });
+          logger.info("Inserted image record", { img });
+        }
+        return u;
+      });
+
+      const result = await prisma.sneaker.findUnique({
+        where: { id: existingSneaker.id },
         include: { images: true, stocks: true, brand: true },
       });
 
-      res.json(updated);
+      res.json(result);
     } catch (err) {
       logger.error("Error updating sneaker", { message: err.message });
-      res.status(500).json({ error: "Failed to update sneaker" });
+      res.status(500).json({
+        success: false,
+        error: {
+          code: "INTERNAL_ERROR",
+          message: "Failed to update sneaker",
+        },
+      });
     }
   },
 );
@@ -429,7 +690,10 @@ router.delete("/:id", adminAuth, async (req, res) => {
     const id = parseInt(req.params.id);
 
     if (isNaN(id) || id <= 0) {
-      return res.status(400).json({ error: "Invalid sneaker ID" });
+      return res.status(400).json({
+        success: false,
+        error: { code: "VALIDATION_FAILED", message: "Invalid sneaker ID" },
+      });
     }
 
     // Verify sneaker exists
@@ -439,7 +703,10 @@ router.delete("/:id", adminAuth, async (req, res) => {
     });
 
     if (!sneaker) {
-      return res.status(404).json({ error: "Sneaker not found" });
+      return res.status(404).json({
+        success: false,
+        error: { code: "NOT_FOUND", message: "Sneaker not found" },
+      });
     }
 
     // Delete associated images
@@ -480,7 +747,10 @@ router.delete("/:id", adminAuth, async (req, res) => {
     res.json({ success: true, message: "Sneaker deleted successfully" });
   } catch (err) {
     logger.error("Error deleting sneaker", { message: err.message });
-    res.status(500).json({ error: "Failed to delete sneaker" });
+    res.status(500).json({
+      success: false,
+      error: { code: "INTERNAL_ERROR", message: "Failed to delete sneaker" },
+    });
   }
 });
 
@@ -491,7 +761,13 @@ router.delete("/:sneakerId/images/:imageId", adminAuth, async (req, res) => {
     const imageId = parseInt(req.params.imageId);
 
     if (isNaN(sneakerId) || sneakerId <= 0 || isNaN(imageId) || imageId <= 0) {
-      return res.status(400).json({ error: "Invalid sneaker or image ID" });
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: "VALIDATION_FAILED",
+          message: "Invalid sneaker or image ID",
+        },
+      });
     }
 
     // Verify image belongs to specified sneaker
@@ -500,13 +776,20 @@ router.delete("/:sneakerId/images/:imageId", adminAuth, async (req, res) => {
     });
 
     if (!img) {
-      return res.status(404).json({ error: "Image not found" });
+      return res.status(404).json({
+        success: false,
+        error: { code: "NOT_FOUND", message: "Image not found" },
+      });
     }
 
     if (img.sneakerId !== sneakerId) {
-      return res
-        .status(403)
-        .json({ error: "Image does not belong to this sneaker" });
+      return res.status(403).json({
+        success: false,
+        error: {
+          code: "FORBIDDEN",
+          message: "Image does not belong to this sneaker",
+        },
+      });
     }
 
     // Delete local file if exists
@@ -541,7 +824,10 @@ router.delete("/:sneakerId/images/:imageId", adminAuth, async (req, res) => {
     res.json({ success: true, message: "Image deleted successfully" });
   } catch (err) {
     logger.error("Error deleting image", { message: err.message });
-    res.status(500).json({ error: "Failed to delete image" });
+    res.status(500).json({
+      success: false,
+      error: { code: "INTERNAL_ERROR", message: "Failed to delete image" },
+    });
   }
 });
 
@@ -549,19 +835,28 @@ router.delete("/:sneakerId/images/:imageId", adminAuth, async (req, res) => {
 router.post("/:id/images/register", adminAuth, async (req, res) => {
   try {
     const sneakerId = parseInt(req.params.id);
-    const { s3Key, filename, contentType, checksum, url } = req.body;
+    const { s3Key, filename, contentType, checksum, url } = req.body || {};
 
     if (isNaN(sneakerId) || sneakerId <= 0) {
-      return res.status(400).json({ error: "Invalid sneaker ID" });
+      return res.status(400).json({
+        success: false,
+        error: { code: "VALIDATION_FAILED", message: "Invalid sneaker ID" },
+      });
     }
 
     // Validate required fields
     if (!s3Key || typeof s3Key !== "string" || !s3Key.trim()) {
-      return res.status(400).json({ error: "S3 key is required" });
+      return res.status(400).json({
+        success: false,
+        error: { code: "VALIDATION_FAILED", message: "S3 key is required" },
+      });
     }
 
     if (!filename || typeof filename !== "string" || !filename.trim()) {
-      return res.status(400).json({ error: "Filename is required" });
+      return res.status(400).json({
+        success: false,
+        error: { code: "VALIDATION_FAILED", message: "Filename is required" },
+      });
     }
 
     // Verify sneaker exists
@@ -570,34 +865,56 @@ router.post("/:id/images/register", adminAuth, async (req, res) => {
     });
 
     if (!sneaker) {
-      return res.status(404).json({ error: "Sneaker not found" });
-    }
-
-    let scanStatus = "pending";
-
-    try {
-      if (headObject) {
-        const meta = await headObject(s3Key);
-        if (
-          contentType &&
-          meta.ContentType &&
-          !meta.ContentType.startsWith(contentType.split("/")[0])
-        ) {
-          logger.warn("MIME type mismatch for S3 object", {
-            s3Key,
-            expectedContentType: contentType,
-            actualContentType: meta.ContentType,
-          });
-        }
-      }
-    } catch (headErr) {
-      logger.warn("Failed to head S3 object", {
-        s3Key,
-        message: headErr.message,
+      return res.status(404).json({
+        success: false,
+        error: { code: "NOT_FOUND", message: "Sneaker not found" },
       });
     }
 
-    // Construct correct image URL if not provided
+    // log input for debugging
+    logger.info("Image registration request body", {
+      sneakerId,
+      s3Key,
+      filename,
+      contentType,
+      checksum,
+      url,
+    });
+
+    let scanStatus = "pending";
+
+    // if we have a storage client configured we can inspect the object
+    const awsConfigured = isConfigured();
+
+    if (awsConfigured) {
+      try {
+        if (headObject) {
+          const meta = await headObject(s3Key);
+          if (
+            contentType &&
+            meta.ContentType &&
+            !meta.ContentType.startsWith(contentType.split("/")[0])
+          ) {
+            logger.warn("MIME type mismatch for S3 object", {
+              s3Key,
+              expectedContentType: contentType,
+              actualContentType: meta.ContentType,
+            });
+          }
+        }
+      } catch (headErr) {
+        logger.warn("Failed to head S3 object", {
+          s3Key,
+          message: headErr.message,
+        });
+      }
+    } else {
+      logger.info(
+        "Skipping S3 object inspection because storage is not configured",
+      );
+    }
+
+    // Construct correct image URL if not provided by client
     let imgUrl = url;
     if (!imgUrl) {
       if (process.env.AWS_S3_BUCKET) {
@@ -605,20 +922,27 @@ router.post("/:id/images/register", adminAuth, async (req, res) => {
           const endpoint = process.env.AWS_S3_ENDPOINT.replace(/\/$/, "");
           imgUrl = `${endpoint}/${process.env.AWS_S3_BUCKET}/${s3Key}`;
         } else {
-          imgUrl = `https://${process.env.AWS_S3_BUCKET}.s3.${process.env.AWS_REGION || "us-east-1"}.amazonaws.com/${s3Key}`;
+          imgUrl = `https://${process.env.AWS_S3_BUCKET}.s3.${
+            process.env.AWS_REGION || "us-east-1"
+          }.amazonaws.com/${s3Key}`;
         }
       } else {
         // Fallback: construct local file URL from s3Key or filename
-        // For s3Key format like "sneakers/{id}/{filename}", extract just the filename
-        const urlFilename = s3Key.includes("/")
-          ? s3Key.split("/").pop()
-          : filename;
+        const urlFilename =
+          s3Key && s3Key.includes("/") ? s3Key.split("/").pop() : filename;
         imgUrl = `/uploads/${urlFilename}`;
       }
     }
 
-    // Validate checksum if provided
-    if (checksum && typeof checksum === "string") {
+    logger.info("Registering image for sneaker", {
+      sneakerId,
+      s3Key,
+      url: imgUrl,
+      awsConfigured,
+    });
+
+    // Validate checksum if provided and if storage available
+    if (checksum && typeof checksum === "string" && awsConfigured) {
       try {
         const buf = await getObjectBuffer(s3Key);
         const actual = await computeChecksum(buf);
@@ -634,7 +958,11 @@ router.post("/:id/images/register", adminAuth, async (req, res) => {
           }
 
           return res.status(400).json({
-            error: "Checksum mismatch - file may be corrupted",
+            success: false,
+            error: {
+              code: "VALIDATION_FAILED",
+              message: "Checksum mismatch - file may be corrupted",
+            },
           });
         }
 
@@ -654,26 +982,35 @@ router.post("/:id/images/register", adminAuth, async (req, res) => {
         return res.status(201).json(created);
       } catch (err) {
         logger.error("Checksum validation error", { message: err.message });
-        return res.status(500).json({ error: "Failed to validate checksum" });
+        return res.status(500).json({
+          success: false,
+          error: {
+            code: "INTERNAL_ERROR",
+            message: "Failed to validate checksum",
+          },
+        });
       }
     }
 
-    // No checksum - create with pending status
-    const created = await prisma.sneakerImage.create({
+    // No checksum or storage is not configured - create with pending status
+    const createdNoChecksum = await prisma.sneakerImage.create({
       data: {
         url: imgUrl,
         filename: filename.substring(0, 255),
         s3Key,
-        checksum: null,
+        checksum: checksum && awsConfigured ? checksum : null,
         scanStatus,
         sneakerId,
       },
     });
 
-    res.status(201).json(created);
+    return res.status(201).json(createdNoChecksum);
   } catch (err) {
     logger.error("Image registration error", { message: err.message });
-    res.status(500).json({ error: "Failed to register image" });
+    res.status(500).json({
+      success: false,
+      error: { code: "INTERNAL_ERROR", message: "Failed to register image" },
+    });
   }
 });
 
@@ -684,7 +1021,10 @@ router.post("/:id/images/order", adminAuth, async (req, res) => {
     const { order } = req.body;
 
     if (isNaN(sneakerId) || sneakerId <= 0) {
-      return res.status(400).json({ error: "Invalid sneaker ID" });
+      return res.status(400).json({
+        success: false,
+        error: { code: "VALIDATION_FAILED", message: "Invalid sneaker ID" },
+      });
     }
 
     if (!Array.isArray(order)) {
@@ -699,7 +1039,10 @@ router.post("/:id/images/order", adminAuth, async (req, res) => {
     });
 
     if (!sneaker) {
-      return res.status(404).json({ error: "Sneaker not found" });
+      return res.status(404).json({
+        success: false,
+        error: { code: "NOT_FOUND", message: "Sneaker not found" },
+      });
     }
 
     // Validate all IDs are valid integers
@@ -735,7 +1078,13 @@ router.post("/:id/images/order", adminAuth, async (req, res) => {
     res.json({ success: true, message: "Image order updated" });
   } catch (err) {
     logger.error("Error updating image order", { message: err.message });
-    res.status(500).json({ error: "Failed to update image order" });
+    res.status(500).json({
+      success: false,
+      error: {
+        code: "INTERNAL_ERROR",
+        message: "Failed to update image order",
+      },
+    });
   }
 });
 

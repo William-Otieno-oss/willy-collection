@@ -38,29 +38,29 @@ class ErrorBoundary extends React.Component {
     const isDevelopment = process.env.NODE_ENV !== "production";
 
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4 py-20">
-        <Card className="p-8 max-w-md w-full">
+      <div className="min-h-screen bg-neutral-50 flex items-center justify-center px-4 py-20">
+        <Card className="p-6 sm:p-8 max-w-md w-full">
           <div className="text-center">
             <div className="text-6xl mb-4">⚠️</div>
-            <h1 className="text-2xl font-bold text-gray-900 mb-4">
+            <h1 className="text-2xl font-bold text-neutral-900 mb-4">
               Oops! Something Went Wrong
             </h1>
-            <p className="text-gray-600 mb-6">
+            <p className="text-neutral-600 mb-6">
               We encountered an unexpected error. Our team has been notified.
               Please try refreshing the page or contact support.
             </p>
 
             {isDevelopment && this.state.error && (
-              <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-left">
-                <p className="text-sm font-mono text-red-700 break-words">
+              <div className="mb-6 p-4 bg-error-light border border-error rounded-lg text-left">
+                <p className="text-sm font-mono text-error break-words">
                   <strong>Error:</strong> {this.state.error.toString()}
                 </p>
                 {this.state.errorInfo && (
                   <details className="mt-4 text-xs">
-                    <summary className="cursor-pointer font-semibold text-red-700">
+                    <summary className="cursor-pointer font-semibold text-error">
                       Stack Trace
                     </summary>
-                    <pre className="mt-2 whitespace-pre-wrap text-red-700 overflow-auto max-h-40">
+                    <pre className="mt-2 whitespace-pre-wrap text-error overflow-auto max-h-40">
                       {this.state.errorInfo.componentStack}
                     </pre>
                   </details>
@@ -71,19 +71,19 @@ class ErrorBoundary extends React.Component {
             <div className="space-y-3">
               <button
                 onClick={() => window.location.reload()}
-                className="w-full px-4 py-2 bg-accent hover:bg-orange-600 text-gray-900 font-semibold rounded-lg transition-all"
+                className="btn-primary w-full"
               >
                 Reload Page
               </button>
               <a
                 href="/"
-                className="block w-full px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-900 font-semibold rounded-lg transition-all text-center"
+                className="block w-full px-4 py-2 bg-neutral-200 hover:bg-neutral-300 text-neutral-900 font-semibold rounded-lg transition-all text-center"
               >
                 Go Home
               </a>
             </div>
 
-            <p className="mt-6 text-sm text-gray-600">
+            <p className="mt-6 text-sm text-neutral-600">
               Need help?{" "}
               <a
                 href="mailto:support@willy.com"

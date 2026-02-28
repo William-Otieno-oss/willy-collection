@@ -33,7 +33,12 @@ router.get("/", async (req, res) => {
     res.json(brands);
   } catch (err) {
     logger.error("Error fetching brands:", { message: err.message });
-    res.status(500).json({ error: "Failed to fetch brands" });
+    res
+      .status(500)
+      .json({
+        success: false,
+        error: { code: "INTERNAL_ERROR", message: "Failed to fetch brands" },
+      });
   }
 });
 
@@ -43,7 +48,12 @@ router.get("/:slug", async (req, res) => {
     const { slug } = req.params;
 
     if (!slug || typeof slug !== "string") {
-      return res.status(400).json({ error: "Invalid slug" });
+      return res
+        .status(400)
+        .json({
+          success: false,
+          error: { code: "VALIDATION_FAILED", message: "Invalid slug" },
+        });
     }
 
     const brand = await prisma.brand.findUnique({
@@ -52,13 +62,23 @@ router.get("/:slug", async (req, res) => {
     });
 
     if (!brand) {
-      return res.status(404).json({ error: "Brand not found" });
+      return res
+        .status(404)
+        .json({
+          success: false,
+          error: { code: "NOT_FOUND", message: "Brand not found" },
+        });
     }
 
     res.json(brand);
   } catch (err) {
     logger.error("Error fetching brand:", { message: err.message });
-    res.status(500).json({ error: "Failed to fetch brand" });
+    res
+      .status(500)
+      .json({
+        success: false,
+        error: { code: "INTERNAL_ERROR", message: "Failed to fetch brand" },
+      });
   }
 });
 
@@ -69,14 +89,25 @@ router.post("/", adminAuth, async (req, res) => {
 
     const validName = validateBrandName(name);
     if (!validName) {
-      return res.status(400).json({
-        error: "Brand name is required and must be a non-empty string",
-      });
+      return res
+        .status(400)
+        .json({
+          success: false,
+          error: {
+            code: "VALIDATION_FAILED",
+            message: "Brand name is required and must be a non-empty string",
+          },
+        });
     }
 
     const finalSlug = slug ? validateSlug(slug) : validateSlug(validName);
     if (!finalSlug) {
-      return res.status(400).json({ error: "Invalid slug" });
+      return res
+        .status(400)
+        .json({
+          success: false,
+          error: { code: "VALIDATION_FAILED", message: "Invalid slug" },
+        });
     }
 
     const created = await prisma.brand.create({
@@ -99,7 +130,12 @@ router.post("/", adminAuth, async (req, res) => {
     res.status(201).json(created);
   } catch (err) {
     logger.error("Error creating brand:", { message: err.message });
-    res.status(500).json({ error: "Failed to create brand" });
+    res
+      .status(500)
+      .json({
+        success: false,
+        error: { code: "INTERNAL_ERROR", message: "Failed to create brand" },
+      });
   }
 });
 
@@ -108,13 +144,23 @@ router.put("/:id", adminAuth, async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     if (isNaN(id) || id <= 0) {
-      return res.status(400).json({ error: "Invalid brand ID" });
+      return res
+        .status(400)
+        .json({
+          success: false,
+          error: { code: "VALIDATION_FAILED", message: "Invalid brand ID" },
+        });
     }
 
     // Verify brand exists
     const existingBrand = await prisma.brand.findUnique({ where: { id } });
     if (!existingBrand) {
-      return res.status(404).json({ error: "Brand not found" });
+      return res
+        .status(404)
+        .json({
+          success: false,
+          error: { code: "NOT_FOUND", message: "Brand not found" },
+        });
     }
 
     const { name, slug, description, imageUrl, order, featured } = req.body;
@@ -125,7 +171,13 @@ router.put("/:id", adminAuth, async (req, res) => {
       if (!validName) {
         return res
           .status(400)
-          .json({ error: "Brand name must be a non-empty string" });
+          .json({
+            success: false,
+            error: {
+              code: "VALIDATION_FAILED",
+              message: "Brand name must be a non-empty string",
+            },
+          });
       }
       update.name = validName;
     }
@@ -133,7 +185,12 @@ router.put("/:id", adminAuth, async (req, res) => {
     if (slug !== undefined) {
       const validSlug = validateSlug(slug);
       if (!validSlug) {
-        return res.status(400).json({ error: "Invalid slug" });
+        return res
+          .status(400)
+          .json({
+            success: false,
+            error: { code: "VALIDATION_FAILED", message: "Invalid slug" },
+          });
       }
       update.slug = validSlug;
     }
@@ -168,7 +225,12 @@ router.put("/:id", adminAuth, async (req, res) => {
     res.json(updated);
   } catch (err) {
     logger.error("Error updating brand:", { message: err.message });
-    res.status(500).json({ error: "Failed to update brand" });
+    res
+      .status(500)
+      .json({
+        success: false,
+        error: { code: "INTERNAL_ERROR", message: "Failed to update brand" },
+      });
   }
 });
 
@@ -177,14 +239,24 @@ router.delete("/:id", adminAuth, async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     if (isNaN(id) || id <= 0) {
-      return res.status(400).json({ error: "Invalid brand ID" });
+      return res
+        .status(400)
+        .json({
+          success: false,
+          error: { code: "VALIDATION_FAILED", message: "Invalid brand ID" },
+        });
     }
 
     await prisma.brand.delete({ where: { id } });
     res.json({ success: true });
   } catch (err) {
     logger.error("Error deleting brand:", { message: err.message });
-    res.status(500).json({ error: "Failed to delete brand" });
+    res
+      .status(500)
+      .json({
+        success: false,
+        error: { code: "INTERNAL_ERROR", message: "Failed to delete brand" },
+      });
   }
 });
 

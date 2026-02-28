@@ -9,6 +9,7 @@ import { LoadingSpinner, EmptyState } from "../../components/Loading";
 import API_BASE, {
   adminFetcher,
   adminPutRequest,
+  adminDeleteRequest,
   APIError,
 } from "../../lib/api";
 
@@ -46,54 +47,26 @@ export default function AdminOrders() {
   const [updatingId, setUpdatingId] = useState(null);
 
   useEffect(() => {
-    // Check authentication
-    const token = localStorage.getItem("admin_token");
-    const expiresAt = localStorage.getItem("admin_token_expires");
-
-    if (!token || !expiresAt || parseInt(expiresAt) <= Date.now()) {
-      localStorage.removeItem("admin_token");
-      localStorage.removeItem("admin_token_expires");
-      router.push("/admin/login");
-      return;
-    }
-
-    setAuthenticated(true);
-    load();
+    // Attempt to load orders; if it fails with 401 redirect to login
+    const check = async () => {
+      try {
+        await load();
+        setAuthenticated(true);
+      } catch (err) {
+        if (err.status === 401) {
+          router.push("/admin/login");
+        }
+      }
+    };
+    check();
   }, [router]);
 
   async function load() {
     try {
       setLoading(true);
       setError("");
-      const token = localStorage.getItem("admin_token");
-
-      if (!token) {
-        throw new APIError("No authentication token", 401, null);
-      }
-
-      const response = await fetch(
-        `${API_BASE}/api/orders?limit=500&offset=0`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-            "X-Requested-With": "XMLHttpRequest",
-          },
-        },
-      );
-
-      if (response.status === 401) {
-        localStorage.removeItem("admin_token");
-        localStorage.removeItem("admin_token_expires");
-        router.push("/admin/login");
-        return;
-      }
-
-      if (!response.ok) {
-        throw new APIError("Failed to load orders", response.status, null);
-      }
-
-      const data = await response.json();
+      // authenticated fetch via cookie
+      const data = await adminFetcher("/api/orders?limit=500&offset=0");
       if (Array.isArray(data)) {
         setOrders(data);
       } else {
@@ -126,39 +99,8 @@ export default function AdminOrders() {
     }
 
     setUpdatingId(id);
-    const token = localStorage.getItem("admin_token");
-
     try {
-      if (!token) {
-        throw new APIError("No authentication token", 401, null);
-      }
-
-      const response = await fetch(`${API_BASE}/api/orders/${id}/status`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-          "X-Requested-With": "XMLHttpRequest",
-        },
-        body: JSON.stringify({ status: newStatus }),
-      });
-
-      if (response.status === 401) {
-        localStorage.removeItem("admin_token");
-        localStorage.removeItem("admin_token_expires");
-        router.push("/admin/login");
-        return;
-      }
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new APIError(
-          errorData.error || "Failed to update order",
-          response.status,
-          errorData,
-        );
-      }
-
+      await adminPutRequest(`/api/orders/${id}/status`, { status: newStatus });
       // Reload orders after successful update
       await load();
     } catch (err) {
@@ -173,10 +115,24 @@ export default function AdminOrders() {
     }
   }
 
-  const filteredOrders =
-    filterStatus === "all"
-      ? orders
-      : orders.filter((o) => o.status === filterStatus);
+  async function deleteOrder(id) {
+    if (typeof id !== "number" || id < 1) {
+      setError("Invalid order ID");
+      return;
+    }
+    try {
+      await adminDeleteRequest(`/api/orders/${id}`);
+      await load();
+    } catch (err) {
+      if (err instanceof APIError && err.status === 401) {
+        router.push("/admin/login");
+      } else if (err instanceof APIError && err.status === 404) {
+        setError("Order not found");
+      } else {
+        setError("Failed to delete order. Please try again.");
+      }
+    }
+  }
 
   const stats = {
     total: orders.length,
@@ -184,10 +140,23 @@ export default function AdminOrders() {
     processing: orders.filter((o) => o.status === "Processing").length,
     delivered: orders.filter((o) => o.status === "Delivered").length,
     totalRevenue: orders.reduce((sum, o) => {
-      const total = Math.max(0, o.total || 0);
-      return sum + (typeof total === "number" ? total : 0);
+      const orderTotal = Array.isArray(o.items)
+        ? o.items.reduce((itemSum, item) => {
+            const itemPrice = typeof item.price === "number" ? item.price : 0;
+            const itemQuantity =
+              typeof item.quantity === "number" ? item.quantity : 0;
+            return itemSum + itemPrice * itemQuantity;
+          }, 0)
+        : 0;
+      return sum + Math.max(0, orderTotal);
     }, 0),
   };
+
+  // derive filtered list based on current tab; keep array reference stable
+  const filteredOrders =
+    filterStatus === "all"
+      ? orders
+      : orders.filter((o) => o.status === filterStatus);
 
   if (loading) {
     return (
@@ -381,7 +350,18 @@ export default function AdminOrders() {
                       Total Amount
                     </p>
                     <p className="text-lg font-bold text-green-600">
-                      KES {Math.max(0, order.total || 0).toFixed(0)}
+                      KES{" "}
+                      {Array.isArray(order.items)
+                        ? order.items
+                            .reduce(
+                              (sum, item) =>
+                                sum +
+                                (Math.max(0, item.price || 0) *
+                                  (item.quantity || 1)),
+                              0
+                            )
+                            .toFixed(0)
+                        : "0"}
                     </p>
                   </div>
 
@@ -395,6 +375,30 @@ export default function AdminOrders() {
                     </p>
                   </div>
                 </div>
+
+                {/* Payment Info (if available) */}
+                {order.payment && (
+                  <div className="mb-4 p-4 bg-gray-50 rounded">
+                    <p className="text-xs text-gray-600 font-semibold mb-1 uppercase">
+                      Payment Details
+                    </p>
+                    <p className="text-sm">
+                      Method:{" "}
+                      {order.payment.checkoutRequestId ? "MPESA" : "N/A"}
+                    </p>
+                    <p className="text-sm">Status: {order.payment.status}</p>
+                    {order.payment.mpesaNumber && (
+                      <p className="text-sm">
+                        Phone: {order.payment.mpesaNumber}
+                      </p>
+                    )}
+                    {order.payment.checkoutRequestId && (
+                      <p className="text-sm">
+                        ID: {order.payment.checkoutRequestId}
+                      </p>
+                    )}
+                  </div>
+                )}
 
                 {/* Items List */}
                 {order.items && order.items.length > 0 && (
@@ -489,6 +493,18 @@ export default function AdminOrders() {
                         {updatingId === order.id ? "..." : "Cancel"}
                       </Button>
                     )}
+                  <Button
+                    size="sm"
+                    variant="danger"
+                    onClick={() => {
+                      if (confirm("Delete this order permanently?")) {
+                        deleteOrder(order.id);
+                      }
+                    }}
+                    disabled={updatingId === order.id}
+                  >
+                    Delete
+                  </Button>
                 </div>
               </Card>
             ))}

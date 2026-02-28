@@ -25,53 +25,22 @@ export function reportWebVitals(metric) {
   }
 }
 
-// Check if admin token is expired
-function isAdminTokenExpired() {
-  if (typeof window === "undefined") return false;
-
-  const token = localStorage.getItem("admin_token");
-  const expiresAt = localStorage.getItem("admin_token_expires");
-
-  if (!token || !expiresAt) return false;
-
-  const expirationTime = parseInt(expiresAt);
-  return expirationTime <= Date.now();
-}
-
-// Clear expired admin session
-function clearExpiredAdminSession() {
-  localStorage.removeItem("admin_token");
-  localStorage.removeItem("admin_token_expires");
-}
+// Authentication is now managed via HTTP-only cookies set by the backend.
+// Individual pages perform their own checks and redirect to login if needed.
+// We do not manage tokens in client-side storage here.
 
 export default function App({ Component, pageProps }) {
   const router = useRouter();
 
   useEffect(() => {
-    // Check for expired admin token on mount
-    if (isAdminTokenExpired()) {
-      clearExpiredAdminSession();
-      // Redirect to login if on admin page
-      if (router.pathname.startsWith("/admin")) {
-        router.push("/admin/login");
-      }
-    }
-
     // Prefetch critical pages on mount
     const criticalPages = ["/cart", "/checkout"];
     criticalPages.forEach((page) => {
       router.prefetch(page);
     });
 
-    // Handle route changes - check token expiration before navigating to admin pages
-    const handleRouteChange = (url) => {
-      if (url.startsWith("/admin") && isAdminTokenExpired()) {
-        clearExpiredAdminSession();
-        router.push("/admin/login");
-      }
-    };
-
-    router.events.on("routeChangeStart", handleRouteChange);
+    // No global auth checks here; individual admin pages handle their own
+    // redirects when API calls return 401.
 
     // Log page view (only in development)
     if (process.env.NODE_ENV !== "production") {
@@ -80,12 +49,9 @@ export default function App({ Component, pageProps }) {
       };
       router.events.on("routeChangeComplete", logRouteChange);
       return () => {
-        router.events.off("routeChangeStart", handleRouteChange);
         router.events.off("routeChangeComplete", logRouteChange);
       };
     }
-
-    return () => router.events.off("routeChangeStart", handleRouteChange);
   }, [router]);
 
   return (
