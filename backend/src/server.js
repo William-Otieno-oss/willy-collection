@@ -29,6 +29,7 @@ const app = express();
 const port = config.PORT;
 const NODE_ENV = config.NODE_ENV;
 const ALLOWED_ORIGINS = config.ALLOWED_ORIGINS;
+let server;
 
 // In production, trust proxy headers (for HTTPS enforcement)
 if (NODE_ENV === "production") {
@@ -329,7 +330,7 @@ const startServer = async () => {
     process.exit(1);
   }
 
-  const server = app.listen(port, "0.0.0.0", () => {
+  server = app.listen(port, "0.0.0.0", () => {
     logger.info("Backend server started", {
       port,
       environment: NODE_ENV,
@@ -353,6 +354,11 @@ startServer();
 // Graceful shutdown
 const gracefulShutdown = async () => {
   logger.info("Shutting down gracefully...");
+  if (!server) {
+    await prisma.$disconnect();
+    process.exit(0);
+  }
+
   server.close(async () => {
     try {
       logger.info("Server closed");

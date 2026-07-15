@@ -5,9 +5,41 @@ import Link from "next/link";
 import PageHeader from "../../components/PageHeader";
 import Card from "../../components/Card";
 import Button from "../../components/Button";
-import Badge from "../../components/Badge";
 import { LoadingSpinner } from "../../components/Loading";
-import API_BASE, { fetcher, APIError, adminFetcher } from "../../lib/api";
+import { APIError, adminFetcher, resolveApiUrl } from "../../lib/api";
+
+const sections = [
+  {
+    href: "/admin/products",
+    title: "Manage Products",
+    description: "View, edit, or delete sneaker products",
+    label: "01",
+  },
+  {
+    href: "/admin/products/new",
+    title: "Add New Product",
+    description: "Create a new sneaker listing",
+    label: "02",
+  },
+  {
+    href: "/admin/sizes",
+    title: "Manage Sizes & Stock",
+    description: "Update inventory and size options",
+    label: "03",
+  },
+  {
+    href: "/admin/orders",
+    title: "View Orders",
+    description: "Review and manage customer orders",
+    label: "04",
+  },
+  {
+    href: "/admin/settings",
+    title: "Settings",
+    description: "Configure store settings",
+    label: "05",
+  },
+];
 
 export default function AdminDashboard() {
   const router = useRouter();
@@ -24,11 +56,15 @@ export default function AdminDashboard() {
   useEffect(() => {
     const check = async () => {
       try {
+        await adminFetcher("/api/orders?limit=1");
         setAuthenticated(true);
         await loadStats();
       } catch (err) {
-        if (err.status === 401) {
+        if (err.status === 401 || err.status === 403) {
           router.push("/admin/login");
+        } else {
+          setError("Failed to verify admin session.");
+          setLoading(false);
         }
       }
     };
@@ -40,29 +76,20 @@ export default function AdminDashboard() {
       setLoading(true);
       setError("");
 
-      const headers = {
-        "Content-Type": "application/json",
-      };
-
-      // Fetch products list so we can count them. previously we only requested
-      // a single item (`limit=1`) which caused the dashboard to show “1” even
-      // when there were many more products.  The manage-products page already
-      // pulls the full list and derives its own count, so we can reuse that
-      // approach here.
       const productsData = await adminFetcher("/api/sneakers");
+      const ordersData = await adminFetcher("/api/orders?limit=500&offset=0");
+
       const productCount = Array.isArray(productsData)
         ? productsData.length
         : productsData && Array.isArray(productsData.data)
           ? productsData.data.length
           : 0;
 
-      // Fetch orders
-      const ordersData = await adminFetcher("/api/orders?limit=500&offset=0");
-
-      const pending = ordersData.filter((o) => o.status === "Pending").length;
-      const revenue = ordersData.reduce((sum, o) => {
-        const orderTotal = Array.isArray(o.items)
-          ? o.items.reduce((itemSum, item) => {
+      const orders = Array.isArray(ordersData) ? ordersData : [];
+      const pending = orders.filter((order) => order.status === "Pending").length;
+      const revenue = orders.reduce((sum, order) => {
+        const orderTotal = Array.isArray(order.items)
+          ? order.items.reduce((itemSum, item) => {
               const itemPrice = typeof item.price === "number" ? item.price : 0;
               const itemQuantity =
                 typeof item.quantity === "number" ? item.quantity : 0;
@@ -74,16 +101,14 @@ export default function AdminDashboard() {
 
       setStats({
         totalProducts: Math.max(0, productCount),
-        totalOrders: ordersData.length,
+        totalOrders: orders.length,
         pendingOrders: pending,
         totalRevenue: revenue,
       });
     } catch (err) {
-      // Error handled via error state
-      if (err instanceof APIError && err.status === 401) {
+      if (err instanceof APIError && (err.status === 401 || err.status === 403)) {
         setError("Session expired. Redirecting to login...");
         setTimeout(() => {
-          // Token is stored as HTTP-only cookie; redirecting to login will clear it server-side
           router.push("/admin/login");
         }, 1500);
       } else {
@@ -96,56 +121,19 @@ export default function AdminDashboard() {
 
   const handleLogout = async () => {
     try {
-      const response = await fetch(`${API_BASE}/api/auth/logout`, {
+      await fetch(resolveApiUrl("/api/auth/logout"), {
         method: "POST",
         credentials: "include",
         headers: {
           "Content-Type": "application/json",
         },
       });
-      if (!response.ok) {
-        console.error("Logout failed");
-      }
-    } catch (err) {
-      console.error("Logout error:", err);
+    } catch {
+      // Redirect either way; logout should not strand the admin.
     } finally {
-      // Always redirect to login after logout attempt
       router.push("/admin/login");
     }
   };
-
-  const sections = [
-    {
-      href: "/admin/products",
-      title: "Manage Products",
-      description: "View, edit, or delete sneaker products",
-      icon: "👟",
-    },
-    {
-      href: "/admin/products/new",
-      title: "Add New Product",
-      description: "Create a new sneaker listing",
-      icon: "➕",
-    },
-    {
-      href: "/admin/sizes",
-      title: "Manage Sizes & Stock",
-      description: "Update inventory and size options",
-      icon: "📦",
-    },
-    {
-      href: "/admin/orders",
-      title: "View Orders",
-      description: "Review and manage customer orders",
-      icon: "📋",
-    },
-    {
-      href: "/admin/settings",
-      title: "Settings",
-      description: "Configure store settings",
-      icon: "⚙️",
-    },
-  ];
 
   if (loading) {
     return (
@@ -155,9 +143,7 @@ export default function AdminDashboard() {
     );
   }
 
-  if (!authenticated) {
-    return null; // Will redirect in useEffect
-  }
+  if (!authenticated) return null;
 
   return (
     <Layout>
@@ -168,7 +154,6 @@ export default function AdminDashboard() {
       />
 
       <div className="max-w-7xl mx-auto px-4 py-16">
-        {/* Logout button in top right */}
         <div className="flex justify-end mb-8">
           <Button variant="secondary" size="sm" onClick={handleLogout}>
             Logout
@@ -181,97 +166,39 @@ export default function AdminDashboard() {
           </div>
         )}
 
-        {/* Stats Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
-          <Card
-            className="p-6 hover:shadow-lg transition-all animate-slideUp"
-            hoverable
-          >
-            <div className="flex items-start justify-between">
-              <div>
-                <p className="text-gray-600 text-sm font-medium mb-1">
-                  Total Products
-                </p>
-                <p className="text-4xl font-bold text-gray-900">
-                  {stats.totalProducts}
-                </p>
-              </div>
-              <span className="text-3xl">👟</span>
-            </div>
-          </Card>
-
-          <Card
-            className="p-6 hover:shadow-lg transition-all animate-slideUp"
-            style={{ animationDelay: "50ms" }}
-            hoverable
-          >
-            <div className="flex items-start justify-between">
-              <div>
-                <p className="text-gray-600 text-sm font-medium mb-1">
-                  Total Orders
-                </p>
-                <p className="text-4xl font-bold text-gray-900">
-                  {stats.totalOrders}
-                </p>
-              </div>
-              <span className="text-3xl">📦</span>
-            </div>
-          </Card>
-
-          <Card
-            className="p-6 border-l-4 border-yellow-500 hover:shadow-lg transition-all animate-slideUp"
-            style={{ animationDelay: "100ms" }}
-            hoverable
-          >
-            <div className="flex items-start justify-between">
-              <div>
-                <p className="text-gray-600 text-sm font-medium mb-1">
-                  Pending Orders
-                </p>
-                <p className="text-4xl font-bold text-yellow-600">
-                  {stats.pendingOrders}
-                </p>
-              </div>
-              <span className="text-3xl">⏳</span>
-            </div>
-          </Card>
-
-          <Card
-            className="p-6 border-l-4 border-green-500 hover:shadow-lg transition-all animate-slideUp"
-            style={{ animationDelay: "150ms" }}
-            hoverable
-          >
-            <div className="flex items-start justify-between">
-              <div>
-                <p className="text-gray-600 text-sm font-medium mb-1">
-                  Total Revenue
-                </p>
-                <p className="text-4xl font-bold text-green-600">
-                  KES {Math.max(0, stats.totalRevenue).toFixed(0)}
-                </p>
-              </div>
-              <span className="text-3xl">💰</span>
-            </div>
-          </Card>
+          {[
+            ["Products", stats.totalProducts],
+            ["Orders", stats.totalOrders],
+            ["Pending", stats.pendingOrders],
+            ["Revenue", `KES ${Math.max(0, stats.totalRevenue).toFixed(0)}`],
+          ].map(([label, value], index) => (
+            <Card
+              key={label}
+              className="p-6 hover:shadow-lg transition-all animate-slideUp"
+              style={{ animationDelay: `${index * 50}ms` }}
+              hoverable
+            >
+              <p className="text-gray-600 text-sm font-medium mb-1">{label}</p>
+              <p className="text-4xl font-bold text-gray-900">{value}</p>
+            </Card>
+          ))}
         </div>
 
-        {/* Quick Actions */}
         <div>
           <h2 className="text-2xl font-bold text-gray-900 mb-6">
             Quick Actions
           </h2>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {sections.map((section, idx) => (
+            {sections.map((section, index) => (
               <Link key={section.href} href={section.href}>
                 <Card
                   hoverable
                   className="p-6 group cursor-pointer h-full"
-                  style={{ animationDelay: `${idx * 50}ms` }}
+                  style={{ animationDelay: `${index * 50}ms` }}
                 >
-                  <div className="flex items-start justify-between mb-4">
-                    <div className="text-4xl group-hover:scale-110 transition-transform">
-                      {section.icon}
-                    </div>
+                  <div className="text-sm font-semibold text-accent mb-4">
+                    {section.label}
                   </div>
                   <h3 className="text-lg font-bold text-gray-900 mb-2 group-hover:text-accent transition-colors">
                     {section.title}
@@ -279,8 +206,8 @@ export default function AdminDashboard() {
                   <p className="text-gray-600 text-sm mb-6 line-clamp-2">
                     {section.description}
                   </p>
-                  <span className="inline-flex items-center text-accent font-semibold text-sm group-hover:gap-2 gap-1 transition-all">
-                    Access →
+                  <span className="inline-flex items-center text-accent font-semibold text-sm">
+                    Access
                   </span>
                 </Card>
               </Link>

@@ -22,7 +22,7 @@
     "node-vibrant": "^3.1.6",
     "postcss": "8.4.24",
     "tailwindcss": "3.4.7",
-    "@opennextjs/cloudflare": "latest",
-    "wrangler": "latest"
+    "@opennextjs/cloudflare": "0.6.6",
+    "wrangler": "4.110.0"
   }
 }

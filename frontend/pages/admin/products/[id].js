@@ -7,7 +7,6 @@ import {
   adminPostRequest,
   adminPutRequest,
   adminDeleteRequest,
-  APIError,
 } from "../../../lib/api";
 import { useRouter } from "next/router";
 
@@ -16,6 +15,7 @@ export default function EditProduct() {
   const { id } = router.query;
   const [authenticated, setAuthenticated] = useState(false);
   const [s, setS] = useState(null);
+  const [brands, setBrands] = useState([]);
   const [sizes, setSizes] = useState([]);
   const [stocks, setStocks] = useState([]);
   const [newStock, setNewStock] = useState({
@@ -31,6 +31,17 @@ export default function EditProduct() {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [perFileProgress, setPerFileProgress] = useState({});
   const [notFound, setNotFound] = useState(false);
+
+  function parseJsonArray(value) {
+    if (Array.isArray(value)) return value;
+    if (typeof value !== "string") return [];
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
 
   useEffect(() => {
     const checkAuth = async () => {
@@ -60,6 +71,9 @@ export default function EditProduct() {
 
       const sizesData = await adminFetcher("/api/admin/sizes");
       setSizes(Array.isArray(sizesData) ? sizesData : []);
+
+      const brandsData = await adminFetcher("/api/brands");
+      setBrands(Array.isArray(brandsData) ? brandsData : []);
 
       // stocks may be part of item response; if not, fetch separately
       const stocksList = item.stocks || [];
@@ -135,6 +149,11 @@ export default function EditProduct() {
   }
 
   async function uploadImages() {
+    if (!newImages || newImages.length === 0) {
+      alert("Choose at least one image first");
+      return;
+    }
+
     setUploading(true);
     setUploadProgress(0);
     setPerFileProgress({});
@@ -172,7 +191,7 @@ export default function EditProduct() {
       }
 
       // all files uploaded, refresh state
-      const full = await adminFetcher(`/api/sneakers/${s.slug}`);
+      const full = await adminFetcher(`/api/sneakers/${id}`);
       setS(full);
       setNewImages(null);
       alert("Images uploaded successfully");
@@ -219,17 +238,19 @@ export default function EditProduct() {
 
   async function updateProduct(e) {
     e.preventDefault();
-    const form = new URLSearchParams();
-    form.append("brand", s.brand);
-    form.append("modelName", s.modelName);
-    form.append("description", s.description || "");
-    form.append("price", String(s.price || 0));
-    form.append("categories", JSON.stringify(s.categories || []));
-    form.append("colors", JSON.stringify(s.colors || []));
-    form.append("featured", s.featured ? "true" : "false");
-    form.append("inStock", s.inStock ? "true" : "false");
+    const payload = {
+      brandId: Number(s.brandId || s.brand?.id),
+      modelName: s.modelName,
+      description: s.description || "",
+      price: Number(s.price || 0),
+      categories: parseJsonArray(s.categories),
+      colors: parseJsonArray(s.colors),
+      featured: Boolean(s.featured),
+      inStock: Boolean(s.inStock),
+    };
     try {
-      await adminPutRequest(`/api/sneakers/${id}`, form);
+      const updated = await adminPutRequest(`/api/sneakers/${id}`, payload);
+      setS((prev) => ({ ...prev, ...updated }));
       alert("Product updated");
     } catch (err) {
       alert("Update failed");
@@ -239,7 +260,7 @@ export default function EditProduct() {
   async function deleteImage(imgId) {
     if (!confirm("Delete image?")) return;
     try {
-      await adminDeleteRequest(`/api/sneakers/images/${imgId}`);
+      await adminDeleteRequest(`/api/sneakers/${id}/images/${imgId}`);
       setS((prev) => ({
         ...prev,
         images: prev.images.filter((i) => i.id !== imgId),
@@ -290,11 +311,26 @@ export default function EditProduct() {
         <div className="grid md:grid-cols-2 gap-4">
           <div>
             <label className="block">Brand</label>
-            <input
+            <select
               className="w-full p-2 border"
-              value={getBrandName(s.brand)}
-              onChange={(e) => setS((p) => ({ ...p, brand: e.target.value }))}
-            />
+              value={s.brandId || s.brand?.id || ""}
+              onChange={(e) => {
+                const brandId = Number(e.target.value);
+                const brand = brands.find((item) => item.id === brandId);
+                setS((p) => ({
+                  ...p,
+                  brandId,
+                  brand: brand || p.brand,
+                }));
+              }}
+            >
+              <option value="">Select brand</option>
+              {brands.map((brand) => (
+                <option key={brand.id} value={brand.id}>
+                  {brand.name}
+                </option>
+              ))}
+            </select>
           </div>
           <div>
             <label className="block">Model</label>
@@ -370,11 +406,11 @@ export default function EditProduct() {
                 onDragOver={onDragOver}
                 onDrop={(e) => onDrop(e, img.id)}
               >
-                <div className="cursor-move p-1">☰</div>
+                <div className="cursor-move p-1">Drag</div>
                 <img
                   src={getImageUrl(img.url)}
                   onError={(e) => {
-                    e.target.src = "/placeholder.png";
+                    e.target.src = "/placeholder.svg";
                   }}
                   className="w-32 h-24 object-cover"
                 />

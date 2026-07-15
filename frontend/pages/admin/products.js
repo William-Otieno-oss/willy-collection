@@ -2,11 +2,9 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/router";
 import Layout from "../../components/Layout";
 import {
-  API_BASE,
   getImageUrl,
   adminFetcher,
   adminDeleteRequest,
-  APIError,
 } from "../../lib/api";
 import Link from "next/link";
 import Button from "../../components/Button";
@@ -55,7 +53,7 @@ export default function ProductsAdmin() {
         setAuthenticated(true);
         load();
       } catch (err) {
-        if (err.status === 401) {
+        if (err.status === 401 || err.status === 403) {
           router.push("/admin/login");
         }
       }
@@ -185,7 +183,7 @@ export default function ProductsAdmin() {
                       alt={product.modelName}
                       className="w-full h-full object-cover group-hover:scale-110 transition-transform"
                       onError={(e) => {
-                        e.target.src = "/placeholder.png";
+                        e.target.src = "/placeholder.svg";
                       }}
                     />
                   ) : (

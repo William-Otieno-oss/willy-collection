@@ -5,7 +5,6 @@ import {
   API_BASE,
   adminPostRequest,
   adminFetcher,
-  APIError,
 } from "../../../lib/api";
 
 export default function NewProduct() {
@@ -169,8 +168,6 @@ export default function NewProduct() {
                 }
               };
               xhr.onload = async () => {
-                // log upload result
-                console.debug(`PUT returned status ${xhr.status}`);
                 if (xhr.status >= 200 && xhr.status < 300) {
                   // register with checksum and supply the exact url we used
                   try {
@@ -185,8 +182,6 @@ export default function NewProduct() {
                       const basename = key.split("/").pop();
                       body.url = `/uploads/${basename}`;
                     }
-                    console.debug("register image body", body);
-
                     const registerRes = await fetch(
                       `${API_BASE}/api/sneakers/${created.id}/images/register`,
                       {

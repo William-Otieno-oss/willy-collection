@@ -1,6 +1,5 @@
 const express = require("express");
 const router = express.Router();
-const axios = require("axios");
 const prisma = require("../db");
 const logger = require("../middleware/logger");
 
@@ -97,12 +96,24 @@ router.post("/mpesa", async (req, res) => {
       TransactionDesc: `Order ${orderId}`,
     };
 
-    const lipanaResp = await axios.post(LIPANA_BASE, lipanaPayload, {
+    const lipanaResp = await fetch(LIPANA_BASE, {
+      method: "POST",
       headers: {
         Authorization: `Bearer ${config.LIPANA_TOKEN}`,
         "Content-Type": "application/json",
       },
+      body: JSON.stringify(lipanaPayload),
     });
+
+    const lipanaData = await lipanaResp.json().catch(() => ({}));
+    if (!lipanaResp.ok) {
+      const error = new Error("Lipana payment request failed");
+      error.response = {
+        status: lipanaResp.status,
+        data: lipanaData,
+      };
+      throw error;
+    }
 
     // save payment record
     const payment = await prisma.payment.create({
@@ -110,7 +121,7 @@ router.post("/mpesa", async (req, res) => {
         orderId,
         mpesaNumber,
         amount,
-        checkoutRequestId: lipanaResp.data.CheckoutRequestID,
+        checkoutRequestId: lipanaData.CheckoutRequestID,
         status: "pending",
       },
     });

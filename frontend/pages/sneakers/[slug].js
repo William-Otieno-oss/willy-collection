@@ -145,7 +145,7 @@ export default function ProductPage() {
                   decoding="async"
                   className="w-full h-96 object-cover"
                   onError={(e) => {
-                    e.target.src = "/placeholder.png";
+                    e.target.src = "/placeholder.svg";
                   }}
                 />
               ) : (
@@ -168,7 +168,7 @@ export default function ProductPage() {
                       decoding="async"
                       className="w-full h-24 object-cover hover:opacity-75 transition-opacity cursor-pointer"
                       onError={(e) => {
-                        e.target.src = "/placeholder.png";
+                        e.target.src = "/placeholder.svg";
                       }}
                     />
                   </div>

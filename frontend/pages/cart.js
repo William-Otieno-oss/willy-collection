@@ -249,14 +249,14 @@ export default function Cart() {
                           src={
                             getImageUrl(item.image) ||
                             getImageUrl(item.images?.[0]?.url) ||
-                            "/placeholder.png"
+                            "/placeholder.svg"
                           }
                           alt={item.modelName || item.name || "Sneaker"}
                           loading="lazy"
                           decoding="async"
                           className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300"
                           onError={(e) => {
-                            e.target.src = "/placeholder.png";
+                            e.target.src = "/placeholder.svg";
                           }}
                         />
                       </div>

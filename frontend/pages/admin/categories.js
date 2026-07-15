@@ -2,12 +2,11 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/router";
 import Layout from "../../components/Layout";
 import {
-  API_BASE,
+  fetcher,
   adminFetcher,
   adminPostRequest,
   adminPutRequest,
   adminDeleteRequest,
-  APIError,
 } from "../../lib/api";
 
 export default function AdminCategories() {
@@ -37,10 +36,13 @@ export default function AdminCategories() {
   useEffect(() => {
     const check = async () => {
       try {
-        await fetchCategories();
+        await adminFetcher("/api/orders?limit=1");
         setAuthenticated(true);
+        await fetchCategories();
       } catch (err) {
-        if (err.status === 401) router.push("/admin/login");
+        if (err.status === 401 || err.status === 403) {
+          router.push("/admin/login");
+        }
       }
     };
     check();
@@ -49,11 +51,11 @@ export default function AdminCategories() {
   const fetchCategories = async () => {
     try {
       setLoading(true);
-      const response = await fetch(`${API_BASE}/api/categories`);
-      const data = await response.json();
-      setCategories(data);
+      const data = await fetcher("/api/categories");
+      setCategories(Array.isArray(data) ? data : []);
     } catch (error) {
-      // Error handled via error state
+      setErrorMsg("Network error fetching categories");
+      setCategories([]);
     } finally {
       setLoading(false);
     }
@@ -208,6 +210,8 @@ export default function AdminCategories() {
     });
     setEditingId(null);
   };
+
+  if (!authenticated) return null;
 
   return (
     <Layout>

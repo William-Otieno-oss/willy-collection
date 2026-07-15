@@ -142,9 +142,7 @@ router.get("/", async (req, res) => {
     // Note: Prisma PostgreSQL does not support mode: "insensitive" on contains
     // Must filter results in application layer
     const allSneakers = await prisma.sneaker.findMany({
-      where: {
-        ...(req.query.brand || req.query.category ? where : {}),
-      },
+      where: brandParam ? where : {},
       include: {
         images: {
           select: { id: true, url: true, order: true, filename: true },
@@ -620,10 +618,14 @@ router.put(
         } else {
           // Local fallback when S3 is not configured
           try {
+            const uploadDir = path.join(__dirname, "..", "..", "uploads");
+            if (!fs.existsSync(uploadDir)) {
+              fs.mkdirSync(uploadDir, { recursive: true });
+            }
             const localName = `${Date.now()}-${Math.random()
               .toString(36)
               .slice(2)}${path.extname(sanitizedName)}`;
-            const dest = path.join(__dirname, "..", "..", "uploads", localName);
+            const dest = path.join(uploadDir, localName);
             fs.writeFileSync(dest, f.buffer);
             url = `/uploads/${localName}`;
             logger.info("Buffered file written to disk", { dest, url });
@@ -714,7 +716,13 @@ router.delete("/:id", adminAuth, async (req, res) => {
       try {
         // Delete local file if exists
         if (img.url && img.url.startsWith("/uploads/")) {
-          const filePath = path.join(__dirname, "..", "..", img.url);
+          const filePath = path.join(
+            __dirname,
+            "..",
+            "..",
+            "uploads",
+            path.basename(img.url),
+          );
           if (fs.existsSync(filePath)) {
             fs.unlinkSync(filePath);
           }
@@ -795,7 +803,13 @@ router.delete("/:sneakerId/images/:imageId", adminAuth, async (req, res) => {
     // Delete local file if exists
     try {
       if (img.url && img.url.startsWith("/uploads/")) {
-        const filePath = path.join(__dirname, "..", "..", img.url);
+        const filePath = path.join(
+          __dirname,
+          "..",
+          "..",
+          "uploads",
+          path.basename(img.url),
+        );
         if (fs.existsSync(filePath)) {
           fs.unlinkSync(filePath);
         }

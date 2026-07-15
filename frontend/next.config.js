@@ -14,10 +14,28 @@ const nextConfig = {
     domains: [
       "images.unsplash.com",
       "localhost",
-      "localhost:4000",
-      "localhost:9000",
-      "127.0.0.1:9000",
+      "127.0.0.1",
       "willy-bucket.s3.us-east-1.amazonaws.com",
+    ],
+    remotePatterns: [
+      {
+        protocol: "http",
+        hostname: "localhost",
+        port: "4000",
+        pathname: "/**",
+      },
+      {
+        protocol: "http",
+        hostname: "localhost",
+        port: "9000",
+        pathname: "/**",
+      },
+      {
+        protocol: "http",
+        hostname: "127.0.0.1",
+        port: "9000",
+        pathname: "/**",
+      },
     ],
   },
 
@@ -73,10 +91,6 @@ const nextConfig = {
           {
             key: "Referrer-Policy",
             value: "strict-origin-when-cross-origin",
-          },
-          {
-            key: "Cache-Control",
-            value: "public, s-maxage=31536000, immutable",
           },
         ],
       },

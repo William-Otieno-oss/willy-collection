@@ -1,75 +1,104 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
+const DEFAULT_DEV_API_BASE = "http://localhost:4000";
+const RAW_API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
+const API_BASE = (
+  RAW_API_BASE ||
+  (process.env.NODE_ENV === "development" ? DEFAULT_DEV_API_BASE : "")
+).replace(/\/+$/, "");
 
 export default API_BASE;
 export { API_BASE };
 
+export function resolveApiUrl(url) {
+  if (!url || typeof url !== "string") return API_BASE || "";
+  if (/^https?:\/\//i.test(url)) return url;
+  const path = url.startsWith("/") ? url : `/${url}`;
+  return API_BASE ? `${API_BASE}${path}` : path;
+}
+
 export function getImageUrl(imageUrl) {
   if (!imageUrl || typeof imageUrl !== "string") return null;
-  // absolute URL already
-  if (/^https?:\/\//i.test(imageUrl)) return imageUrl;
-
-  // ensure API_BASE has no trailing slash
-  let base = API_BASE || "";
-  if (!base && typeof window !== "undefined") {
-    base = window.location.origin;
+  if (/^(https?:)?\/\//i.test(imageUrl) || imageUrl.startsWith("data:")) {
+    return imageUrl;
   }
-  if (base.endsWith("/")) base = base.slice(0, -1);
-  // ensure imageUrl begins with slash
-  if (!imageUrl.startsWith("/")) imageUrl = "/" + imageUrl;
 
-  return base + imageUrl;
+  const path = imageUrl.startsWith("/") ? imageUrl : `/${imageUrl}`;
+  if (path.startsWith("/uploads/") && API_BASE) {
+    return `${API_BASE}${path}`;
+  }
+  return path;
 }
 
-// Access token is now stored in an HTTP-only cookie set by the server.
-// JavaScript cannot read it directly, so we avoid using localStorage entirely.
-// Refreshes are handled by calling the /api/auth/refresh endpoint; the server
-// rotates both the refresh and access cookies automatically. Responses still
-// include the token for backward compatibility, but client code should ignore
-// storing it.
-
-async function refreshTokenIfNeeded() {
-  // This helper can be invoked prior to making an authenticated request.  It
-  // simply calls the refresh endpoint; if the cookie has expired or is
-  // invalid the request will return 401 and we propagate that.
+function clearExpiredAuth() {
+  if (typeof window === "undefined") return;
   try {
-    await fetchWithTimeout(API_BASE + "/api/auth/refresh", {
-      method: "POST",
-      credentials: "include",
-    });
-  } catch (err) {
-    // propagate for callers to handle (e.g. redirect to login)
-    throw err;
+    localStorage.removeItem("token");
+    localStorage.removeItem("access_token");
+    localStorage.removeItem("admin");
+  } catch {
+    // Ignore storage failures; auth state is owned by HTTP-only cookies.
   }
 }
 
-// Generic fetch with error handling and timeout
+function hasHeader(headers, name) {
+  return Object.keys(headers).some(
+    (key) => key.toLowerCase() === name.toLowerCase(),
+  );
+}
+
+function isNativeBody(body) {
+  return (
+    (typeof FormData !== "undefined" && body instanceof FormData) ||
+    (typeof URLSearchParams !== "undefined" &&
+      body instanceof URLSearchParams) ||
+    (typeof Blob !== "undefined" && body instanceof Blob) ||
+    (typeof ArrayBuffer !== "undefined" && body instanceof ArrayBuffer)
+  );
+}
+
+function buildFetchOptions(options, signal) {
+  const { headers: optionHeaders = {}, body: optionBody, ...rest } = options;
+  const headers = { ...optionHeaders };
+  let body = optionBody;
+
+  if (body !== undefined && body !== null && !isNativeBody(body)) {
+    if (typeof body === "object") {
+      body = JSON.stringify(body);
+    }
+    if (!hasHeader(headers, "Content-Type")) {
+      headers["Content-Type"] = "application/json";
+    }
+  }
+
+  return {
+    credentials: "include",
+    ...rest,
+    signal,
+    headers,
+    ...(body !== undefined ? { body } : {}),
+  };
+}
+
 async function fetchWithTimeout(url, options = {}, timeout = 30000) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeout);
 
   try {
-    const response = await fetch(url, {
-      credentials: "include", // send cookies for auth
-      ...options,
-      signal: controller.signal,
-      headers: {
-        "Content-Type": "application/json",
-        ...options.headers,
-      },
-    });
+    const response = await fetch(
+      resolveApiUrl(url),
+      buildFetchOptions(options, controller.signal),
+    );
 
     clearTimeout(timeoutId);
 
-    // Validate response
     if (!response) {
       throw new APIError("No response from server", 0, null);
     }
 
     let data = null;
-    const contentType = response.headers.get("content-type");
-    if (contentType && contentType.includes("application/json")) {
+    const contentType = response.headers.get("content-type") || "";
+    if (response.status !== 204 && contentType.includes("application/json")) {
       data = await response.json().catch(() => null);
-    } else {
+    } else if (response.status !== 204) {
       data = await response.text().catch(() => null);
     }
 
@@ -77,8 +106,14 @@ async function fetchWithTimeout(url, options = {}, timeout = 30000) {
       if (response.status === 401) {
         clearExpiredAuth();
       }
+
+      const serverError = data?.error;
       const errorMessage =
-        data?.error || data?.message || `HTTP ${response.status}`;
+        (typeof serverError === "string" && serverError) ||
+        serverError?.message ||
+        data?.message ||
+        response.statusText ||
+        `HTTP ${response.status}`;
       throw new APIError(errorMessage, response.status, data);
     }
 
@@ -102,9 +137,15 @@ async function fetchWithTimeout(url, options = {}, timeout = 30000) {
   }
 }
 
-// Public API fetch
+async function refreshTokenIfNeeded() {
+  await fetchWithTimeout("/api/auth/refresh", {
+    method: "POST",
+    credentials: "include",
+  });
+}
+
 export async function fetcher(url) {
-  const { data } = await fetchWithTimeout(API_BASE + url);
+  const { data } = await fetchWithTimeout(url);
 
   if (!data) return [];
   if (Array.isArray(data)) return data;
@@ -112,107 +153,68 @@ export async function fetcher(url) {
   return [];
 }
 
-// Admin API fetch – relies on HTTP-only cookie for authentication.
-// The server will read the access_token cookie (or Authorization header if
-// the caller passes one) and verify accordingly.  We still propagate errors
-// so callers can handle 401/403 and redirect to login.
 export async function adminFetcher(url, options = {}) {
   try {
-    // ensure access token is current; if refresh cookie has expired this call will
-    // return 401 and propagate the error so callers can redirect to login.
-    try {
-      await refreshTokenIfNeeded();
-    } catch (refreshErr) {
-      // if refresh fails due to 401/expired cookie, bubble up so page logic
-      // can handle redirect to login
-      if (refreshErr instanceof APIError && refreshErr.status === 401) {
-        throw refreshErr;
-      }
-      // otherwise ignore and continue; the following fetch may still succeed
+    await refreshTokenIfNeeded();
+  } catch (refreshErr) {
+    if (
+      refreshErr instanceof APIError &&
+      (refreshErr.status === 401 || refreshErr.status === 403)
+    ) {
+      throw refreshErr;
     }
+  }
 
-    const result = await fetchWithTimeout(API_BASE + url, {
-      ...options,
-      credentials: "include",
-    });
-    // return only data for convenience, similar to fetcher
-    return result.data;
-  } catch (error) {
-    throw error;
+  const result = await fetchWithTimeout(url, {
+    ...options,
+    credentials: "include",
+  });
+  return result.data;
+}
+
+function assertRequestBody(body) {
+  if (body === undefined || body === null) {
+    throw new APIError("Invalid request body", 400, null);
   }
 }
 
-// POST request (public)
 export async function postRequest(url, body) {
-  if (!body || typeof body !== "object") {
-    throw new APIError("Invalid request body", 400, null);
-  }
-
-  try {
-    const { data } = await fetchWithTimeout(API_BASE + url, {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
-    return data;
-  } catch (error) {
-    if (error instanceof APIError) throw error;
-    throw new APIError(error.message, 500, null);
-  }
+  assertRequestBody(body);
+  const { data } = await fetchWithTimeout(url, {
+    method: "POST",
+    body,
+  });
+  return data;
 }
 
-// POST request (admin) – cookies authenticate
 export async function adminPostRequest(url, body) {
-  if (!body || typeof body !== "object") {
-    throw new APIError("Invalid request body", 400, null);
-  }
-
-  try {
-    const { data } = await fetchWithTimeout(API_BASE + url, {
-      method: "POST",
-      credentials: "include",
-      body: JSON.stringify(body),
-    });
-    return data;
-  } catch (error) {
-    if (error instanceof APIError) throw error;
-    throw new APIError(error.message, 500, null);
-  }
+  assertRequestBody(body);
+  const { data } = await fetchWithTimeout(url, {
+    method: "POST",
+    credentials: "include",
+    body,
+  });
+  return data;
 }
 
-// PUT request (admin) – cookies authenticate
 export async function adminPutRequest(url, body) {
-  if (!body || typeof body !== "object") {
-    throw new APIError("Invalid request body", 400, null);
-  }
-
-  try {
-    const { data } = await fetchWithTimeout(API_BASE + url, {
-      method: "PUT",
-      credentials: "include",
-      body: JSON.stringify(body),
-    });
-    return data;
-  } catch (error) {
-    if (error instanceof APIError) throw error;
-    throw new APIError(error.message, 500, null);
-  }
+  assertRequestBody(body);
+  const { data } = await fetchWithTimeout(url, {
+    method: "PUT",
+    credentials: "include",
+    body,
+  });
+  return data;
 }
 
-// DELETE request (admin) – cookies authenticate
 export async function adminDeleteRequest(url) {
-  try {
-    const { data } = await fetchWithTimeout(API_BASE + url, {
-      method: "DELETE",
-      credentials: "include",
-    });
-    return data;
-  } catch (error) {
-    if (error instanceof APIError) throw error;
-    throw new APIError(error.message, 500, null);
-  }
+  const { data } = await fetchWithTimeout(url, {
+    method: "DELETE",
+    credentials: "include",
+  });
+  return data;
 }
 
-// Validate order object
 export function validateOrder(order) {
   if (!order || typeof order !== "object") {
     throw new APIError("Invalid order object", 400, null);

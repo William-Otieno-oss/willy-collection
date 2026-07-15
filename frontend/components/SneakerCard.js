@@ -25,12 +25,17 @@ function SneakerCard({ s, onSale }) {
       ? `${sizes[0]} - ${sizes[sizes.length - 1]}`
       : "Sizes available";
 
-  const imageUrl = getImageUrl(s.images?.[0]?.url) || "/placeholder.png";
+  const imageUrl = getImageUrl(s.images?.[0]?.url) || "/placeholder.svg";
   const isOnSale = onSale || s.onSale;
   const discount =
     isOnSale && s.originalPrice
       ? Math.round(((s.originalPrice - s.price) / s.originalPrice) * 100)
       : 0;
+  const ratingSeed = String(s.id || s.slug || s.modelName || "")
+    .split("")
+    .reduce((sum, char) => sum + char.charCodeAt(0), 0);
+  const rating = 3 + (ratingSeed % 3);
+  const reviewCount = 80 + (ratingSeed % 220);
 
   // Wishlist state / toggle
   const _wishId = s.id ?? s.slug;
@@ -178,7 +183,7 @@ function SneakerCard({ s, onSale }) {
                   <svg
                     key={i}
                     className={`h-4 w-4 transition-colors ${
-                      i < Math.floor(Math.random() * 5)
+                      i < rating
                         ? "text-brand"
                         : "text-neutral-300"
                     }`}
@@ -190,7 +195,7 @@ function SneakerCard({ s, onSale }) {
                 ))}
               </div>
               <span className="text-xs font-semibold text-neutral-600">
-                (245)
+                ({reviewCount})
               </span>
             </div>
           </div>

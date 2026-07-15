@@ -2,13 +2,11 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/router";
 import Layout from "../../components/Layout";
 import {
-  API_BASE,
   fetcher,
   adminFetcher,
   adminPostRequest,
   adminPutRequest,
   adminDeleteRequest,
-  APIError,
 } from "../../lib/api";
 
 export default function AdminBanners() {
@@ -33,10 +31,13 @@ export default function AdminBanners() {
   useEffect(() => {
     const check = async () => {
       try {
-        await fetchBanners();
+        await adminFetcher("/api/orders?limit=1");
         setAuthenticated(true);
+        await fetchBanners();
       } catch (err) {
-        if (err.status === 401) router.push("/admin/login");
+        if (err.status === 401 || err.status === 403) {
+          router.push("/admin/login");
+        }
       }
     };
     check();
@@ -74,11 +75,7 @@ export default function AdminBanners() {
     e.preventDefault();
     setErrorMsg("");
     try {
-      const url = editingId
-        ? `${API_BASE}/api/banners/${editingId}`
-        : `${API_BASE}/api/banners`;
-
-      const method = editingId ? "PUT" : "POST";
+      const url = editingId ? `/api/banners/${editingId}` : "/api/banners";
 
       try {
         if (editingId) {
@@ -137,6 +134,8 @@ export default function AdminBanners() {
     });
     setEditingId(null);
   };
+
+  if (!authenticated) return null;
 
   return (
     <Layout>

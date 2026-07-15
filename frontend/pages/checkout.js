@@ -4,6 +4,7 @@ import Layout from "../components/Layout";
 import PageHeader from "../components/PageHeader";
 import Card from "../components/Card";
 import Button from "../components/Button";
+import { postRequest, resolveApiUrl } from "../lib/api";
 
 const TAX_RATE = 0.16;
 
@@ -13,7 +14,7 @@ function safeLoadCart() {
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    // Basic sanitation: ensure minimal fields exist to avoid runtime errors
+
     return parsed.map((it) => ({
       id: Number(it.id) || 0,
       modelName: String(it.modelName || it.name || "Unknown"),
@@ -24,16 +25,19 @@ function safeLoadCart() {
         it.image || (it.images && it.images[0] && it.images[0].url) || null,
       brand: it.brand || null,
     }));
-  } catch (e) {
+  } catch {
     return [];
   }
+}
+
+function clearCart() {
+  localStorage.removeItem("cart");
+  window.dispatchEvent(new Event("cartUpdated"));
 }
 
 export default function Checkout() {
   const router = useRouter();
   const [cart, setCart] = useState([]);
-
-  // form state
   const [customerName, setCustomerName] = useState("");
   const [phone, setPhone] = useState("");
   const [location, setLocation] = useState("");
@@ -44,7 +48,7 @@ export default function Checkout() {
   const [orderSuccess, setOrderSuccess] = useState(false);
   const [orderId, setOrderId] = useState(null);
   const [checkoutRequestId, setCheckoutRequestId] = useState(null);
-  const [paymentStatus, setPaymentStatus] = useState(null); // "pending" | "paid" | "failed"
+  const [paymentStatus, setPaymentStatus] = useState(null);
   const [polling, setPolling] = useState(false);
 
   useEffect(() => {
@@ -52,83 +56,56 @@ export default function Checkout() {
   }, []);
 
   const subtotal = cart.reduce(
-    (s, it) => s + (Number(it.price) || 0) * (it.quantity || 1),
+    (sum, item) => sum + (Number(item.price) || 0) * (item.quantity || 1),
     0,
   );
   const tax = Math.round(subtotal * TAX_RATE);
   const total = subtotal + tax;
 
-  const handlePlaceOrder = async (e) => {
-    e.preventDefault();
+  const orderItems = cart.map((item) => ({
+    sneakerId: item.id,
+    price: item.price,
+    quantity: item.quantity,
+    sneakerName: item.modelName,
+    size: item.size,
+  }));
+
+  const handlePlaceOrder = async (event) => {
+    event.preventDefault();
     if (cart.length === 0) return;
+
     setSubmitting(true);
     setOrderError("");
+
     try {
       if (paymentMethod === "mpesa") {
-        // initiate payment before creating order
-        const payResp = await fetch("/api/payments/mpesa", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            orderId: null, // order not created yet, server can create provisional order or attach later
-            mpesaNumber,
-            amount: cart.reduce((s, it) => s + it.price * it.quantity, 0),
-            // alternatively send full cart and create order server-side after payment
-            items: cart.map((it) => ({
-              sneakerId: it.id,
-              price: it.price,
-              quantity: it.quantity,
-              sneakerName: it.modelName,
-              size: it.size,
-            })),
-            customerName,
-            phone,
-            location,
-          }),
-        });
-        if (payResp.ok) {
-          const data = await payResp.json().catch(() => ({}));
-          const reqId = data.checkoutRequestId;
-          const ordId = data.orderId;
-          setCheckoutRequestId(reqId || null);
-          setOrderId(ordId || null);
-          setPaymentStatus("pending");
-          // start polling endpoint for status
-          setPolling(true);
-        } else {
-          const errdata = await payResp.json().catch(() => ({}));
-          setOrderError(errdata.message || "Failed to initiate payment");
-        }
-      } else {
-        const payload = {
+        const data = await postRequest("/api/payments/mpesa", {
+          orderId: null,
+          mpesaNumber,
+          amount: total,
+          items: orderItems,
           customerName,
           phone,
           location,
-          items: cart.map((it) => ({
-            sneakerId: it.id,
-            price: it.price,
-            quantity: it.quantity,
-            sneakerName: it.modelName,
-            size: it.size,
-          })),
-        };
-        const res = await fetch("/api/orders", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
         });
-        if (res.ok) {
-          const data = await res.json().catch(() => ({}));
-          setOrderSuccess(true);
-          setOrderId(data.id || null);
-          // clear cart
-          localStorage.removeItem("cart");
-          window.dispatchEvent(new Event("cartUpdated"));
-          // stay on page and show confirmation
-        } else {
-          const data = await res.json().catch(() => ({}));
-          setOrderError(data.error?.message || "Failed to place order");
-        }
+
+        setCheckoutRequestId(data.checkoutRequestId || null);
+        setOrderId(data.orderId || null);
+        setPaymentStatus("pending");
+        setPolling(true);
+      } else {
+        const data = await postRequest("/api/orders", {
+          customerName,
+          phone,
+          location,
+          delivery: "Standard",
+          paymentMethod: "Cash on delivery",
+          items: orderItems,
+        });
+
+        setOrderSuccess(true);
+        setOrderId(data.id || null);
+        clearCart();
       }
     } catch (err) {
       setOrderError(err.message || "Failed to place order");
@@ -137,39 +114,39 @@ export default function Checkout() {
     }
   };
 
-  // effect to poll payment status when needed
   useEffect(() => {
     let interval;
     if (polling && checkoutRequestId) {
       interval = setInterval(async () => {
         try {
           const res = await fetch(
-            `/api/payments/mpesa/status/${encodeURIComponent(
-              checkoutRequestId,
-            )}`,
+            resolveApiUrl(
+              `/api/payments/mpesa/status/${encodeURIComponent(
+                checkoutRequestId,
+              )}`,
+            ),
           );
-          if (res.ok) {
-            const data = await res.json().catch(() => ({}));
-            if (data.status && data.status !== paymentStatus) {
-              setPaymentStatus(data.status);
-              if (data.status === "paid") {
-                // payment succeeded, clear cart and stop polling
-                localStorage.removeItem("cart");
-                window.dispatchEvent(new Event("cartUpdated"));
-                setOrderSuccess(true);
-                setPolling(false);
-              }
-              if (data.status === "failed") {
-                setOrderError("Payment failed. Please try again.");
-                setPolling(false);
-              }
-            }
+          if (!res.ok) return;
+
+          const data = await res.json().catch(() => ({}));
+          if (!data.status || data.status === paymentStatus) return;
+
+          setPaymentStatus(data.status);
+          if (data.status === "paid") {
+            clearCart();
+            setOrderSuccess(true);
+            setPolling(false);
           }
-        } catch (e) {
-          // ignore network errors, try again next interval
+          if (data.status === "failed") {
+            setOrderError("Payment failed. Please try again.");
+            setPolling(false);
+          }
+        } catch {
+          // Keep polling; temporary network failures should not abandon payment.
         }
       }, 5000);
     }
+
     return () => {
       if (interval) clearInterval(interval);
     };
@@ -187,7 +164,6 @@ export default function Checkout() {
         <Card className="p-6">
           <h2 className="text-xl font-bold mb-4">Order Summary</h2>
 
-          {/* customer form */}
           <form onSubmit={handlePlaceOrder} className="space-y-4 mb-6">
             <div>
               <label className="block text-sm font-medium text-neutral-700">
@@ -231,8 +207,8 @@ export default function Checkout() {
                 onChange={(e) => setPaymentMethod(e.target.value)}
                 className="mt-1 block w-full border border-neutral-300 rounded-md px-4 py-3 focus:outline-none focus:ring-2 focus:ring-brand/50 focus:border-transparent transition-all"
               >
-                \n <option value="cash">Cash on delivery</option>
-                <option value="mpesa">M-Pesa</option>\n{" "}
+                <option value="cash">Cash on delivery</option>
+                <option value="mpesa">M-Pesa</option>
               </select>
             </div>
             {paymentMethod === "mpesa" && (
@@ -241,7 +217,7 @@ export default function Checkout() {
                   M-Pesa phone
                 </label>
                 <input
-                  required={paymentMethod === "mpesa"}
+                  required
                   value={mpesaNumber}
                   onChange={(e) => setMpesaNumber(e.target.value)}
                   className="mt-1 block w-full border border-neutral-300 rounded-lg shadow-sm p-2.5 focus:ring-2 focus:ring-accent focus:border-transparent transition-all"
@@ -259,24 +235,25 @@ export default function Checkout() {
               <Button type="submit" variant="primary" disabled={submitting}>
                 {submitting
                   ? paymentMethod === "mpesa"
-                    ? "Requesting payment…"
-                    : "Placing…"
+                    ? "Requesting payment..."
+                    : "Placing..."
                   : paymentMethod === "mpesa"
-                    ? "Pay with M‑Pesa"
+                    ? "Pay with M-Pesa"
                     : "Place Order"}
               </Button>
             </div>
             {orderError && <p className="text-red-600 text-sm">{orderError}</p>}
             {paymentMethod === "mpesa" && paymentStatus === "pending" && (
               <p className="text-yellow-600 text-sm">
-                Payment request sent! Waiting for confirmation...
+                Payment request sent. Waiting for confirmation...
               </p>
             )}
-            {paymentMethod === "mpesa" && paymentStatus === "paid" && (
+            {orderSuccess && (
               <div className="space-y-2">
                 <p className="text-green-600 text-sm">
-                  Payment successful! Thank you
-                  {orderId ? ` (Order #${orderId})` : ""}.
+                  {paymentMethod === "mpesa"
+                    ? `Payment successful. Thank you${orderId ? ` (Order #${orderId})` : ""}.`
+                    : `Order placed. Thank you${orderId ? ` (Order #${orderId})` : ""}.`}
                 </p>
                 <div className="flex gap-3">
                   <Button
@@ -286,29 +263,15 @@ export default function Checkout() {
                   >
                     Continue Shopping
                   </Button>
-                </div>
-              </div>
-            )}
-            {paymentMethod !== "mpesa" && orderSuccess && (
-              <div className="space-y-2">
-                <p className="text-green-600 text-sm">
-                  {`Order placed! Thank you${orderId ? ` (Order #${orderId})` : ""}.`}
-                </p>
-                <div className="flex gap-3">
-                  <Button
-                    type="button"
-                    variant="primary"
-                    onClick={() => router.push("/")}
-                  >
-                    Continue Shopping
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    onClick={() => router.push("/cart")}
-                  >
-                    View Cart
-                  </Button>
+                  {paymentMethod !== "mpesa" && (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={() => router.push("/cart")}
+                    >
+                      View Cart
+                    </Button>
+                  )}
                 </div>
               </div>
             )}
@@ -318,21 +281,27 @@ export default function Checkout() {
             <p className="text-sm text-gray-600 mb-6">Your cart is empty.</p>
           ) : (
             <div className="space-y-4 mb-6">
-              {cart.map((it) => (
-                <div key={it.id} className="flex justify-between items-center">
+              {cart.map((item) => (
+                <div
+                  key={`${item.id}-${item.size}`}
+                  className="flex justify-between items-center"
+                >
                   <div>
-                    <div className="font-semibold">{it.modelName}</div>
-                    <div className="text-xs text-gray-500">Size: {it.size}</div>
+                    <div className="font-semibold">{item.modelName}</div>
+                    <div className="text-xs text-gray-500">
+                      Size: {item.size}
+                    </div>
                   </div>
                   <div className="text-right">
                     <div>
                       KES{" "}
-                      {((Number(it.price) || 0) * (it.quantity || 1)).toFixed(
-                        0,
-                      )}
+                      {(
+                        (Number(item.price) || 0) * (item.quantity || 1)
+                      ).toFixed(0)}
                     </div>
                     <div className="text-xs text-gray-500">
-                      {it.quantity} × KES {Number(it.price || 0).toFixed(0)}
+                      {item.quantity} x KES{" "}
+                      {Number(item.price || 0).toFixed(0)}
                     </div>
                   </div>
                 </div>
